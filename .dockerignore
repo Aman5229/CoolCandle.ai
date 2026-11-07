@@ -1,0 +1,22 @@
+*
+!backend
+!agent
+!frontend
+!deploy
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/.hypothesis
+**/test-results
+**/logs
+**/data
+# Credentials never go into an image; the services read them from the environment.
+**/.env*
+**/*.pem
+**/*.key
+**/*.log
+**/*.db

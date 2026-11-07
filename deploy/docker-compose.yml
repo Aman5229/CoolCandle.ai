@@ -1,0 +1,74 @@
+# Production: caddy, api, agent and postgres on one India VM with a static IP.
+# Locally, `docker compose -f deploy/docker-compose.yml up -d postgres` is all you need.
+name: coolcandle
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coolcandle
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coolcandle}
+      POSTGRES_DB: coolcandle
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coolcandle"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      COOLCANDLE_DATABASE_URL: postgresql+asyncpg://coolcandle:${POSTGRES_PASSWORD:-coolcandle}@postgres:5432/coolcandle
+      COOLCANDLE_SECRET_KEY: ${COOLCANDLE_SECRET_KEY:-}  # the api refuses to start without it
+      COOLCANDLE_ALLOWED_ORIGIN: https://${COOLCANDLE_DOMAIN:-localhost}
+      COOLCANDLE_PUBLIC_URL: https://${COOLCANDLE_DOMAIN:-localhost}
+      COOLCANDLE_MARKET_SOURCE: kotak
+      COOLCANDLE_DATA_DIR: /data
+      COOLCANDLE_AGENT_URL: http://agent:8100
+      COOLCANDLE_AGENT_TOKEN: ${COOLCANDLE_AGENT_TOKEN:-}  # the buddy is off until it is set
+      COOLCANDLE_TELEGRAM_BOT_TOKEN: ${COOLCANDLE_TELEGRAM_BOT_TOKEN:-}
+      COOLCANDLE_TELEGRAM_CHAT_ID: ${COOLCANDLE_TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ticks:/data
+
+  # The buddy's model loop (ADR 0004). No database, no broker credentials, no published port:
+  # only core reaches it, and it reaches only core's internal tool routes.
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/agent.Dockerfile
+    restart: unless-stopped
+    environment:
+      COOLCANDLE_AGENT_TOKEN: ${COOLCANDLE_AGENT_TOKEN:-}
+      COOLCANDLE_AGENT_CORE_URL: http://api:8000
+      COOLCANDLE_AGENT_ANTHROPIC_API_KEY: ${COOLCANDLE_AGENT_ANTHROPIC_API_KEY:-}
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      COOLCANDLE_DOMAIN: ${COOLCANDLE_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy:/data
+
+volumes:
+  pgdata:
+  ticks:
+  caddy:
