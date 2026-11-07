@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: coolcandle
+          POSTGRES_PASSWORD: coolcandle
+          POSTGRES_DB: coolcandle
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coolcandle"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      COOLCANDLE_DATABASE_URL: postgresql+asyncpg://coolcandle:coolcandle@localhost:5432/coolcandle
+      COOLCANDLE_TEST_DATABASE_URL: postgresql+asyncpg://coolcandle:coolcandle@localhost:5432/coolcandle
+      COOLCANDLE_SECRET_KEY: n0Yl2Yc0yTPqXzvCkq1h1w2pCq9lUeJ8mZrQ7mJ3p9o=
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy
+      - run: uv run lint-imports
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run pytest
+
+  agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy
+      - run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: uv sync --frozen
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run e2e
+        working-directory: frontend
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [backend, agent, frontend]
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -f deploy/api.Dockerfile .
+      - run: docker build -f deploy/agent.Dockerfile .
+      - run: docker build -f deploy/web.Dockerfile .

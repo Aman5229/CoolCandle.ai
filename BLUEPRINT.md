@@ -4,8 +4,7 @@
 > Version 1.0 · 30 Oct 2026 · Owner: Aman (GitHub `Aman5229`)
 >
 > This is the single source of truth for what CoolCandle.ai is, how it is built, and in what
-> order. It is written so a coding agent (Claude Code) can read it once and build V1 without
-> guessing. Anything marked **DEFAULT** is a recommendation Aman has not confirmed yet; build
+> order. It is written so anyone can read it once and build it without guessing. Anything marked **DEFAULT** is a recommendation Aman has not confirmed yet; build
 > it that way, keep it easy to change, and record the final answer in §2.
 
 ---
@@ -76,6 +75,10 @@ more users and brokers can be added without a rewrite, but sign-up is closed in 
 | D9 | Repo | **New repo** for CoolCandle.ai; old `CoolHead.ai` archived, used for ideas only. | **CONFIRMED** |
 | D10 | Hosting | Small VM in India (Mumbai/Bangalore) with a **static IP** and a persistent disk. | DEFAULT |
 | D11 | Simultaneous trades | **One open trade at a time** in V1. | DEFAULT |
+| D12 | News risk | A calendar of scheduled events. A high-impact event blocks new entries 15 minutes either side and doubles the slippage buffer that day. Exits are never blocked. Headlines only inform (§9.7). | DEFAULT |
+| D13 | Build approach | **All versions built together** (Aman, 7 Nov 2026), ahead of the order in §3. Nothing goes live on the strength of being built: each version's "done when" still applies, and live trailing stays off until Kotak confirms it is allowed. | **CONFIRMED** |
+| D14 | Extra entry rules | From the day-trading reference: no entries before `entry_start` (09:20), reward to risk at least `min_reward_risk` (1), and a stop at least 0.5% from the entry. Sizing reports which limit decided it, and also respects cash and freeze quantity. | DEFAULT |
+| D15 | Where the buddy runs | **Its own service**, `agent/` (Aman, 7 Nov 2026): the model, the conversation and the number check run there, with no database, no broker and no Kotak credentials. Core keeps every tool behind an internal route that answers only during the chat that called it (ADR 0004). **Text chat first; voice is added once the chat has been reviewed.** | **CONFIRMED** |
 
 When Aman confirms or changes a row, update the table and the sections that depend on it.
 
@@ -90,8 +93,8 @@ When Aman confirms or changes a row, update the table and the sections that depe
 | **V2** Decision model | Encode Aman's setups (support/resistance, breakouts, patterns) as detectors; backtest; propose trades with entry, stop, target. | At least one setup passes the gate in §16.2 on unseen data and a month of paper signals. |
 | **V3** Alerts + voice buddy | Telegram/push alerts linking to a confirm screen; a chat then voice agent that explains V2's trades and places them after a tap. | A full voice session on paper: alert → explain → tap → entry → exit; all agent evals pass. |
 
-Nothing from a later version is built until the earlier one is "done", except the **extension
-points** V1 must leave in place (§4.3).
+All versions are built (D13), but a later version does not go live until the earlier one is
+"done". The **extension points** in §4.3 are how they connect.
 
 ---
 
@@ -100,7 +103,8 @@ points** V1 must leave in place (§4.3).
 ### 4.1 Shape
 A **modular monolith**: one Python backend process, one React web app, one Postgres database,
 deployed as Docker containers on one server. Modules talk through small interfaces (ports), so
-later versions add modules rather than change existing ones.
+later versions add modules rather than change existing ones. The one exception is the V3 buddy's
+model loop, which runs beside it as a small service of its own (D15, ADR 0004).
 
 ```
  Browser (React)
@@ -129,6 +133,14 @@ later versions add modules rather than change existing ones.
                 Kotak Neo API (orders from whitelisted static IP; live feed websocket)
 ```
 
+The buddy (D15). The browser only ever talks to core; the agent holds no data of its own:
+```
+ browser ──► core  POST /api/agent/chat                 (session + CSRF, as for every write)
+ core    ──► agent POST /chat                           (shared service token, private network)
+ agent   ──► core  POST /internal/agent/tools/{name}    (a tool token valid only during that chat)
+ agent   ──► Claude API
+```
+
 ### 4.2 Dependency rules (enforced with `import-linter` in CI)
 - `domain` imports only the standard library and Pydantic.
 - `ports` import only `domain`.
@@ -136,12 +148,14 @@ later versions add modules rather than change existing ones.
 - `adapters` import `domain` and `ports`.
 - `api` imports `services` and `domain`. Wiring (which adapter implements which port) happens
   in one place: `backend/src/coolcandle/main.py`.
+- The agent service (`agent/`) is a separate project. It cannot import core; it reaches core only
+  through `/internal/agent/tools`, and core reaches it only through the `Agent` port.
 
 ### 4.3 Extension points V1 must leave in place
 | For | V1 provides | Later version adds |
 |---|---|---|
 | V2 | Tick recorder from day one; candle builder; `OrderRequest.source` field (`manual`/`signal`/`agent`/`trailing`); `SignalSource` port (no implementation) | Detectors, backtester, signal store |
-| V3 | WebSocket event bus; `Notifier` port; `confirm_token` concept on order submit | Telegram notifier, agent with tools, voice |
+| V3 | WebSocket event bus; `Notifier` port; `confirm_token` concept on order submit | Telegram notifier, agent service calling core's tools, then voice |
 | V4 | `OrderService.modify_stop(trade_id, new_trigger)` going through the guard; `TrailingPolicy` port | Trailing rules and the per-tick loop |
 
 ### 4.4 Runtime tasks inside the backend
@@ -170,7 +184,7 @@ All tasks run with an injected `Clock`, so tests can replay a whole day in secon
 | Frontend | React 18, Vite, TypeScript (strict), TanStack Query, TradingView **lightweight-charts** | CSS variables for theming |
 | Tests | pytest, hypothesis (guard properties), pytest-asyncio; Vitest; Playwright e2e | |
 | Quality | ruff, mypy `--strict`, import-linter; eslint/oxlint, `tsc --noEmit` | All in CI |
-| Deploy | Docker Compose: `api`, `web` (static, served by Caddy), `postgres`, `caddy` (HTTPS) | India VM, static IP |
+| Deploy | Docker Compose: `api`, `agent`, `web` (static, served by Caddy), `postgres`, `caddy` (HTTPS) | India VM, static IP |
 | CI | GitHub Actions: lint, types, tests, build images | |
 
 ---
@@ -180,7 +194,6 @@ All tasks run with an injected `Clock`, so tests can replay a whole day in secon
 ```
 coolcandle/
 ├── BLUEPRINT.md                 # this file
-├── CLAUDE.md                    # short rules for coding agents (copy §0)
 ├── README.md                    # setup & run
 ├── docs/
 │   ├── adr/                     # one file per architecture decision (0001-*.md …)
@@ -237,6 +250,11 @@ coolcandle/
 │       ├── contract/            # one suite every Broker adapter must pass (paper first)
 │       ├── replay/              # whole recorded days through the real services
 │       └── api/
+├── agent/                       # V3 buddy service (D15, ADR 0004): no database, no broker
+│   ├── pyproject.toml
+│   ├── src/coolcandle_agent/    # main.py, buddy.py (the loop), prompt.py, core.py (core's tools),
+│   │                            # numbers.py (the number check), anthropic_client.py
+│   └── tests/
 ├── frontend/
 │   ├── package.json
 │   └── src/
@@ -264,7 +282,7 @@ All models are Pydantic v2, `frozen=True`, `Decimal` for money and prices, UTC-a
 | `Instrument` | `key` (e.g. `nse_fo\|48211`), `exchange_segment`, `trading_symbol`, `kind` (INDEX/OPTION/FUTURE/EQUITY), `underlying`, `expiry`, `strike`, `option_type` (CE/PE), `lot_size`, `tick_size`, `freeze_qty` | Option fields required iff `kind=OPTION`. Lot size always from the scrip master, never hard-coded. |
 | `Tick` | `instrument_key`, `ts`, `received_at`, `ltp`, `bid?`, `ask?`, `volume_today?`, `oi?` | Carries the key, not the full instrument. |
 | `Candle` | `instrument_key`, `interval`, `start`, `open/high/low/close`, `volume`, `oi?` | OHLC consistency validator. |
-| `DailyPlan` | `trading_date`, `profit_target`, `loss_limit`, `max_trades`, `max_loss_per_trade`, `entry_cutoff` (14:30), `square_off` (15:15), `cool_off_minutes` (0), `allowed_underlyings`, `status` (DRAFT/CONFIRMING/LOCKED), `confirmations` | |
+| `DailyPlan` | `trading_date`, `profit_target`, `loss_limit`, `max_trades`, `max_loss_per_trade`, `entry_start` (09:20), `entry_cutoff` (14:30), `square_off` (15:15), `cool_off_minutes` (0), `min_reward_risk` (1), `allowed_underlyings`, `trail_at_target` (false), `target_giveback_pct` (20), `status` (DRAFT/CONFIRMING/LOCKED), `confirmations` | |
 | `DaySnapshot` | `realised_pnl`, `unrealised_pnl`, `est_charges`, `net_pnl`, `peak_net_pnl`, `trades_taken`, `open_trade?`, `last_loss_at?`, `feed_age`, `now` | Built by the guard service. |
 | `OrderRequest` | `instrument_key`, `side`, `qty`, `order_type` (LIMIT/SL/SL-M/MARKET), `price?`, `trigger?`, `product` (MIS), `source` (manual/signal/agent/trailing), `intent` (ENTRY/STOP/EXIT/MODIFY_STOP), `trade_id?`, `confirm_token?` | |
 | `Decision` | `action` (ALLOW/WARN/BLOCK/LOCK), `reasons: list[Reason]`, `max_qty?` | Reasons are codes + human text for the UI. |
@@ -294,7 +312,7 @@ Every table has `id` (UUID), `created_at`, `updated_at` unless noted. Money colu
 | `trade_events` | `trade_id`, `ts`, `type`, `data` (JSONB) | Append-only; the journal timeline. |
 | `audit_log` | `user_id?`, `ts`, `action`, `data` (JSONB, secrets removed), `ip` | Sign-ins, mode switches, plan changes, orders, locks. |
 | `instruments` | scrip master fields, `trading_date` | Reloaded daily. |
-| `holidays` | `date`, `exchange`, `name` | Seeded yearly from NSE/BSE circulars. |
+| `holidays` | `date`, `exchange`, `name` | Copied from NSE's F&O holiday circulars into `seeds.py` (BSE closes the same days). Startup makes the table match that list exactly, so a correction also removes a wrong date. A year is added only once NSE publishes it, usually in December. |
 | `settings` | `user_id`, `key`, `value` (JSONB) | Theme, defaults for the plan form. |
 
 ---
@@ -310,10 +328,11 @@ LOCKED: frozen until next trading day. Stricter-only edits allowed (D2), each co
 ```
 - Orders require `status = LOCKED`.
 - Validation: `loss_limit > 0`, `profit_target > 0`, `1 ≤ max_trades ≤ 20`,
-  `max_loss_per_trade ≤ loss_limit`, `entry_cutoff < square_off ≤ 15:20`.
+  `max_loss_per_trade ≤ loss_limit`, `entry_start < entry_cutoff < square_off ≤ 15:20`.
 - "Stricter" means: lower `profit_target`, lower `loss_limit`, lower `max_trades`,
-  lower `max_loss_per_trade`, earlier `entry_cutoff`/`square_off`, longer `cool_off`,
-  smaller `allowed_underlyings`. Anything else is rejected with "The plan is locked for today".
+  lower `max_loss_per_trade`, earlier `entry_cutoff`/`square_off`, later `entry_start`, longer
+  `cool_off`, higher `min_reward_risk`, lower `target_giveback_pct`, smaller `allowed_underlyings`,
+  or turning `trail_at_target` off. Anything else is rejected with "The plan is locked for today".
 
 ### 9.2 What counts
 - **Net P&L** = Σ over today's F&O positions in the broker account of (realised + unrealised)
@@ -359,6 +378,9 @@ For `intent = ENTRY`, every check must pass:
 7. Feed is fresh (last tick < 3 s old) and the limit price is within a band of LTP (default ±3%).
 8. Time is before `entry_cutoff`.
 9. Live mode only: broker session valid, and today's live order count < hard cap (default 30).
+10. Time is after `entry_start`, the market is open, and no trade is flagged `NEEDS_ATTENTION`.
+11. The stop is at least 0.5% from the entry, and any target gives at least `min_reward_risk` (D14).
+12. No high-impact event window is open (D12). On an event day, check 5 uses a doubled buffer.
 
 For `intent = STOP / EXIT / MODIFY_STOP`: always allowed if it reduces risk (exits and tighter
 stops are never blocked, even when locked). A `MODIFY_STOP` that **loosens** a stop is blocked.
@@ -372,6 +394,15 @@ passes check 5; the order ticket uses it as the default quantity.
 - After `LOCKED`, `evaluate` never returns ALLOW for an ENTRY on that trading date.
 - Exits are always allowed.
 - Stricter-only edits can never loosen any field.
+
+### 9.7 News risk (D12)
+- `market_events` holds scheduled events: RBI policy, the Budget and the like. Today's calendar is
+  frozen, like the plan. Seed dates live in `seeds.py`; verify them against official circulars.
+- A `HIGH` event with a time blocks new entries from 15 minutes before to 15 minutes after, and new
+  signals are held back in that window. An event with no time warns but does not block.
+- Any `HIGH` event doubles `slippage_buffer` for the day, so the guard allows a smaller size.
+- Exits, stops and tighter stops are never blocked.
+- Headlines (optional RSS feeds) are tagged and shown. They are leads, not facts: nothing acts on one.
 
 ---
 
@@ -429,7 +460,10 @@ class Broker(Protocol):
     async def place_order(self, req: OrderRequest) -> Order: ...
     async def modify_order(self, broker_order_id: str, changes: OrderChanges) -> Order: ...
     async def cancel_order(self, broker_order_id: str) -> Order: ...
-    def order_updates(self) -> AsyncIterator[Order]: ...
+    async def sync(self) -> None: ...          # refresh from the broker
+    def drain_updates(self) -> list[Order]: ... # order changes since the last call
+    def on_tick(self, tick: Tick) -> None: ...  # paper fills against quotes
+    def restore(self, orders: list[Order]) -> None: ...  # rebuild paper state after a restart
     async def quotes(self, keys: list[str]) -> list[Tick]: ...
 ```
 `BrokerSpec.fields` describes the connect form (name, label, type, secret: bool), so the UI
@@ -480,6 +514,7 @@ limit, using live quotes; applies the same cost model. Paper is the default mode
   and uploads a copy off-server (S3-compatible bucket). This dataset is V2's training data.
 - Option chain endpoint returns strikes around ATM with LTP, bid/ask, OI, change.
 - Stale feed (> 3 s without ticks during market hours) → new entries blocked, banner shown.
+- Only the real feed is recorded: simulated prices must never reach V2's training data.
 
 ---
 
@@ -519,7 +554,14 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 | `POST /trades/{id}/exit` · `POST /trades/{id}/cancel` | Manual exit / cancel pending entry |
 | `GET /trades?date=` · `GET /trades/{id}` | List / timeline |
 | `GET /journal?from=&to=` | Day summaries |
-| `GET/PUT /settings` | Theme, plan form defaults |
+| `GET/PUT /settings` · `POST /settings/sign-out-everywhere` | Theme, plan form defaults, sessions |
+| `GET/POST/DELETE /market/events` · `GET /market/news` | Event calendar (D12) and tagged headlines |
+| `GET /market/holidays?start=&end=` | Exchange holidays in a range (up to a year) with the reason, for the journal calendar |
+| `GET /orders/exit-plan` | Stop and target from a rule, before the entry |
+| `POST /trades/{id}/stop` | Tighten a stop |
+| `GET /signals` · `POST /signals/{id}/take` · `POST /signals/{id}/decline` | V2 signals; `take` is the tap (D6) |
+| `POST /agent/chat` | V3 buddy: core forwards it to the agent service and returns the reply, with the signal card core's own tool approved |
+| `POST /internal/agent/tools/{name}` | Not under `/api`, so Caddy never forwards it. The agent's tool calls; each needs the tool token of a chat in progress |
 
 **WebSocket `/ws`** (one connection, server push; client sends `subscribe` for instruments):
 `tick`, `candle`, `day_status`, `order_update`, `trade_update`, `alert`, `feed_status`.
@@ -578,13 +620,18 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 ### 16.3 V3 Alerts and voice buddy
 - `Notifier` adapters: Telegram bot (owner's chat only), web push, in-app. SMS last (needs DLT registration).
 - Alert text: "NIFTY 24500 CE ~85 · stop 62 · target 120 · valid till 10:42" + signed, expiring link to a confirm screen.
-- Agent: Claude with typed tools only: `get_day_status`, `get_plan`, `get_current_signal`,
-  `propose_trade`, `confirm_trade(confirm_token)`, `exit_trade`. The confirm token is created only by
-  a tap in the UI (D6). All tools go through `OrderService`; the agent refuses after a lock.
-- Text chat first, then voice (speech-to-text → agent → text-to-speech), English and Hindi.
+- Agent: Claude with typed tools only, in its own service (D15, ADR 0004): `get_day_status`,
+  `get_plan`, `get_current_signal`, `get_events`, `propose_trade`, `exit_trade`. Core implements
+  each one. **It has no tool that can enter a trade** (ADR 0003):
+  the tap on Confirm creates the token and submits through `OrderService` (D6). The agent refuses
+  after a lock, and a reply with a number no tool supplied is held back.
+- Text chat first (built), English and Hindi. Voice (speech-to-text → agent → text-to-speech)
+  comes once the chat has been reviewed (D15).
 - Signals carry a price band and expiry; an order is refused if price has left the band.
-- Eval suite of 30+ scripted conversations in CI: refuses when locked, never orders without a tap,
-  never states a price that isn't from the signal, handles "skip today".
+- Eval suite of 30+ scripted conversations in CI, split by service: core plays 25 through its real
+  tools (refuses when locked, never orders without a tap, handles "skip today"), and the agent
+  service tests its loop and number check (never states a price that isn't from a tool). Evals on
+  the real model run in `agent/` behind `--agent-evals`.
 
 ---
 
@@ -596,6 +643,7 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 | Replay | full recorded days through real services with a fake clock: each limit triggers once, restart mid-day keeps the lock, reconcile fixes a missing stop | pytest |
 | API | auth, plan flow, error codes, no secrets in responses/logs | pytest + httpx |
 | Frontend | components and day-state rendering | Vitest |
+| Agent | the buddy's loop, number check, history rollback, service token; real-model evals behind `--agent-evals` | pytest in `agent/` |
 | E2E | sign-in → plan → paper trade → lock → greyed UI | Playwright |
 
 CI blocks merge on: ruff, mypy strict, import-linter, pytest, tsc, lint, Vitest, build.
@@ -604,7 +652,8 @@ CI blocks merge on: ruff, mypy strict, import-linter, pytest, tsc, lint, Vitest,
 
 ## 18. Deployment and operations
 - **Server:** small VM in Mumbai or Bangalore (2 vCPU, 4 GB) with a **static IP**, whitelisted in
-  Kotak's Trade API settings. Docker Compose with `caddy`, `api`, `postgres`. Domain with HTTPS.
+  Kotak's Trade API settings. Docker Compose with `caddy`, `api`, `agent`, `postgres`. Domain with
+  HTTPS. Only `caddy` publishes ports.
 - **Backups:** nightly `pg_dump` + Parquet ticks to an off-server bucket; restore tested once a month.
 - **Monitoring:** health endpoint; alert to Aman (email, then Telegram in V3) on feed down, broker
   session expired, `NEEDS_ATTENTION`, backup failure.
@@ -619,7 +668,7 @@ CI blocks merge on: ruff, mypy strict, import-linter, pytest, tsc, lint, Vitest,
 
 | # | Milestone | Scope | Done when |
 |---|---|---|---|
-| M0 | Foundations | Repo layout (§6), CI, Docker Compose, Postgres + Alembic, VM with static IP, `CLAUDE.md`. Script proving Kotak login, quotes, a far-from-market limit order and its cancel from the server. | A test order placed from the server is accepted by Kotak and cancelled. |
+| M0 | Foundations | Repo layout (§6), CI, Docker Compose, Postgres + Alembic, VM with static IP. Script proving Kotak login, quotes, a far-from-market limit order and its cancel from the server. | A test order placed from the server is accepted by Kotak and cancelled. |
 | M1 | Sign-in and broker connect | Users, app TOTP, sessions, audit log; broker catalog and dynamic form; encrypted credentials; daily connect; funds shown. | Aman signs in and connects Kotak from the browser; no secret in logs (test). |
 | M2 | Live market data | Feed manager, WebSocket hub, candles, chart, option chain, recorder, history backfill. | A full market day watched live and recorded without gaps. |
 | M3 | Plan and guard | Plan lifecycle with two confirmations and stricter-only edits; `domain.guard` with property tests; day monitor; day locks; header meter; locked screen. | Replayed days hit each limit correctly; restart mid-day keeps plan and lock. |
@@ -643,10 +692,10 @@ CI blocks merge on: ruff, mypy strict, import-linter, pytest, tsc, lint, Vitest,
 
 ---
 
-## 21. Out of scope for V1
-Signals, AI, voice, Telegram, trailing, multiple brokers live, multiple users, option selling,
-futures, equity, overnight positions, mobile app, syncing/showing every order made in Kotak's own
-app (only counted, D4), order slicing above freeze quantity.
+## 21. Out of scope
+Multiple brokers live, multiple users, option selling, futures, equity, overnight positions, mobile
+app, syncing/showing every order made in Kotak's own app (only counted, D4), order slicing above
+freeze quantity, SMS alerts, web push.
 
 ---
 
