@@ -1,0 +1,968 @@
+/* Light is the base; dark is set by `data-theme` on <html>. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --sidebar: #ffffff;
+  --hover: #eef0f4;
+  --text: #121722;
+  --muted: #6b7280;
+  --border: #e3e6eb;
+  --accent: #2f6fed;
+  --accent-soft: #e8efff;
+  --up: #12805c;
+  --up-soft: #e3f5ec;
+  --down: #c8322b;
+  --down-soft: #fdeceb;
+  --warn: #a15c00;
+  --warn-soft: #fff3df;
+  --atm: #eaf1ff;
+  --radius: 14px;
+  color-scheme: light;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme='dark'] {
+  --bg: #070b14;
+  --surface: #0d1320;
+  --sidebar: #0a0f1a;
+  --hover: #151d2c;
+  --text: #e7eaf0;
+  --muted: #8b94a7;
+  --border: #1d2535;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.15);
+  --up: #3fcf8e;
+  --up-soft: rgba(63, 207, 142, 0.12);
+  --down: #f2555a;
+  --down-soft: rgba(242, 85, 90, 0.12);
+  --warn: #f0b04a;
+  --warn-soft: rgba(240, 176, 74, 0.12);
+  --atm: #13213b;
+  color-scheme: dark;
+}
+
+/* The brand palette is made for dark backgrounds, so in light mode its wordmark text turns dark. */
+:root:not([data-theme='dark']) {
+  --cc-text: #0b1220;
+}
+
+/* The theme switch: a one-second cross-fade, with a plain transition as the fallback. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 1s;
+}
+
+body {
+  transition: background-color 1s, color 1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+  body {
+    transition: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+h2, h3 {
+  margin: 0;
+}
+
+h2 {
+  font-size: 17px;
+}
+
+h3 {
+  font-size: 14.5px;
+}
+
+a {
+  color: var(--accent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input, select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.up { color: var(--up); font-weight: 600; }
+.down { color: var(--down); font-weight: 600; }
+
+/* --- shell ----------------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 100vh;
+  transition: grid-template-columns 0.25s ease;
+}
+
+.shell.collapsed {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 12px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+}
+
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+}
+
+.nav-item:hover { background: var(--hover); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); }
+
+.side-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.shell.collapsed .nav-text,
+.shell.collapsed .cc-logo__word { display: none; }
+.shell.collapsed .side-head { flex-direction: column; }
+.shell.collapsed .collapse svg { transform: rotate(180deg); }
+.shell.collapsed .nav-item { justify-content: center; padding: 10px; }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.content {
+  position: relative;
+  width: 100%;
+  padding: 20px 24px;
+}
+
+/* --- header ---------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "status meter money";
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar .status { grid-area: status; }
+.topbar .money { grid-area: money; justify-content: flex-end; }
+.menu-btn { grid-area: menu; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip b { color: var(--text); }
+.chip b.up { color: var(--up); }
+.chip b.down { color: var(--down); }
+.chip.ok { color: var(--up); background: var(--up-soft); border-color: transparent; }
+.chip.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.chip.bad { color: var(--down); background: var(--down-soft); border-color: transparent; }
+.chip.info { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dot.pulse { animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes pulse {
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.pulse { animation: none; }
+}
+
+.meter {
+  grid-area: meter;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.meter-track {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.meter-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: left 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.up-bg { background: var(--up); }
+.down-bg { background: var(--down); }
+
+.meter-zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text);
+}
+
+/* --- cards, forms ---------------------------------------------------------- */
+
+.card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* One rhythm for everything inside a card or a component: blocks sit 12px apart, whatever they
+   are. Their own margins are cleared so nothing doubles up or goes missing. Gaps also skip
+   overlays such as dialogs, which sit outside the flow. */
+.card, .flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card > *, .flow > * { margin-block: 0; }
+.card > .btn, .flow > .btn { align-self: flex-start; }
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Buttons wrap onto the next line on a narrow screen instead of running off it. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.row > input { flex: 1 1 160px; width: auto; min-width: 0; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.form-grid.tight {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.check input { width: auto; }
+
+.btn {
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.5; }
+.btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn.danger { border-color: transparent; background: var(--down); color: #fff; }
+.btn.danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--down); }
+.btn.wide { width: 100%; }
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.seg {
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.seg.active { border-color: transparent; background: var(--accent-soft); color: var(--accent); }
+
+.notice {
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.notice.info { background: var(--accent-soft); }
+.notice.warn { background: var(--warn-soft); color: var(--warn); }
+.notice.bad { background: var(--down-soft); color: var(--down); }
+
+.form-error { margin: 0; color: var(--down); font-size: 13px; }
+.form-warn { margin: 0; color: var(--warn); font-size: 13px; }
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; text-align: right; font-weight: 600; }
+.facts.compact { gap: 3px 12px; font-size: 13px; }
+
+.plain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plain li { padding: 3px 0; }
+
+.tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- dialogs --------------------------------------------------------------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(440px, 92vw);
+  padding: 20px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.dialog .row { justify-content: flex-end; }
+
+.auth-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(380px, 100%);
+}
+
+.auth-card p { margin: 0; text-align: center; }
+
+.auth-logo {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 6px;
+}
+
+.center {
+  display: grid;
+  place-items: center;
+  padding: 32px 0;
+}
+
+/* A whole-page loader sits in the middle of the page, not at its top edge. */
+.center.stage { min-height: calc(100vh - 160px); }
+
+/* While the loader shows, the new page loads underneath it: unseen, unclickable, and fading in
+   once revealed. */
+.page-loader { position: absolute; inset: 0 0 auto; }
+.page.behind { visibility: hidden; height: calc(100vh - 160px); overflow: hidden; animation: none; }
+
+/* --- trading --------------------------------------------------------------- */
+
+.trading-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.chart-wrap { position: relative; }
+.chart-box { height: 420px; transition: opacity 0.4s ease; }
+.chart-box.loading { opacity: 0.25; }
+
+.chart-loader {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.chain-card { grid-column: 1; }
+
+/* Room for the sticky top bar, which wraps to two lines on narrow screens. */
+.ticket { scroll-margin-top: 112px; }
+
+.side-column {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chain table,
+table.trades {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chain th,
+table.trades th {
+  padding: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.chain td { padding: 1px 4px; text-align: center; }
+.chain tr.atm { background: var(--atm); }
+.strike { font-weight: 700; }
+
+.cell {
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cell:hover { border-color: var(--accent); background: var(--accent-soft); }
+.cell.active { background: var(--accent); color: #fff; }
+.cell > span { display: block; padding: 4px; border-radius: 5px; }
+
+.locked {
+  align-items: center;
+  text-align: center;
+}
+
+.locked .facts { max-width: 320px; margin-inline: auto; }
+
+.locked-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--down-soft);
+  color: var(--down);
+}
+
+.locked-mark { display: inline-block; }
+
+/* --- journal --------------------------------------------------------------- */
+
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 74px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.day:hover { background: var(--hover); }
+
+/* Days the market is shut: weekends shaded, exchange holidays tinted and named. */
+.day.closed { background: var(--hover); color: var(--muted); }
+.day.holiday { border-color: transparent; background: var(--warn-soft); }
+.day .off { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.day.holiday .off { color: var(--warn); font-weight: 600; }
+
+.day.active { border-color: var(--accent); }
+.day .tag { margin-left: 0; }
+
+.key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+
+.key.holiday { border-color: var(--warn); background: var(--warn-soft); }
+.key.closed { margin-left: 12px; background: var(--hover); }
+
+table.trades td {
+  padding: 7px 6px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+table.trades tbody tr { cursor: pointer; }
+
+.timeline {
+  margin: 4px 0;
+  padding-left: 18px;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+/* --- buddy ----------------------------------------------------------------- */
+
+.buddy {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 110px);
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 78%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: var(--hover);
+}
+
+.bubble p { margin: 0; white-space: pre-wrap; }
+.bubble.you { align-self: flex-end; background: var(--accent); color: #fff; }
+
+/* --- motion ---------------------------------------------------------------- */
+/* Decoration only: nothing waits for an animation, and reduced motion switches them all off.
+   Entrances fill backwards only: an animation still holding a transform would make its box the
+   frame for position: fixed, trapping dialogs and the toast inside a card. */
+
+.content > * { animation: fade-in 0.25s ease-out backwards; }
+.enter { animation: rise 0.28s ease-out backwards; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+.btn, .nav-item, .seg, .cell, .icon-btn {
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.1s, filter 0.15s;
+}
+
+.btn:active:not(:disabled), .cell:active { transform: scale(0.97); }
+
+/* Sending an order: a light sweeps across the button until the broker answers. */
+.btn.busy {
+  background-image: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.28) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: sweep 1.1s linear infinite;
+}
+
+.btn.busy:disabled { opacity: 0.85; }
+
+@keyframes sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.pop { animation: pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+
+@keyframes pop {
+  from { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* A price that just moved, and a stop that just moved. */
+.flash-up, .flash-down, .flash-stop { border-radius: 5px; }
+.flash-up { animation: flash-up 0.8s ease-out; }
+.flash-down { animation: flash-down 0.8s ease-out; }
+.flash-stop { animation: flash-stop 1.2s ease-out; }
+
+@keyframes flash-up {
+  from { background: var(--up-soft); color: var(--up); }
+}
+
+@keyframes flash-down {
+  from { background: var(--down-soft); color: var(--down); }
+}
+
+@keyframes flash-stop {
+  from { background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+}
+
+.dialog-backdrop { animation: fade-in 0.2s ease-out; }
+.dialog { animation: dialog-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.15); }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+}
+
+/* The day locks: the padlock snaps shut, a ring spreads out, the facts follow, the desk greys out. */
+.padlock .shackle, .padlock .body { transform-box: fill-box; }
+.padlock .shackle { transform-origin: 100% 100%; }
+.padlock .body { transform-origin: 50% 50%; }
+.padlock.closing .shackle { animation: shackle-shut 0.7s cubic-bezier(0.3, 1.4, 0.5, 1) 0.1s both; }
+.padlock.closing .body { animation: bump 0.3s ease-out 0.62s; }
+
+@keyframes shackle-shut {
+  0% { transform: translateY(-4px) rotate(-35deg); }
+  55% { transform: translateY(-4px) rotate(0deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes bump {
+  50% { transform: scale(1.08); }
+}
+
+.locked > * { animation: rise 0.45s ease-out backwards; }
+.locked > :nth-child(2) { animation-delay: 0.25s; }
+.locked > :nth-child(3) { animation-delay: 0.35s; }
+.locked > :nth-child(4) { animation-delay: 0.45s; }
+.locked > :nth-child(5) { animation-delay: 0.55s; }
+.locked > .locked-icon { animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) backwards; }
+
+.locked-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--down);
+  border-radius: 50%;
+  animation: ripple 1s ease-out 0.6s both;
+}
+
+@keyframes ripple {
+  0% { opacity: 0; transform: scale(1); }
+  1% { opacity: 0.7; }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+.trading-grid { transition: filter 0.8s ease, opacity 0.8s ease; }
+.trading.is-locked .trading-grid { filter: grayscale(1); opacity: 0.5; }
+
+/* It never takes a click, so it can never cover a button that matters. */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  animation: toast-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.toast .tag { margin-left: 0; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* --- screen sizes ------------------------------------------------------------ */
+/* Laptop from 1100px: the layout as designed. Tablet, 768 to 1099px: the sidebar keeps only its
+   icons. Phone, under 768px: the sidebar becomes a slide-in menu and everything is one column. */
+
+.menu-btn, .nav-backdrop, .short { display: none; }
+
+.table-scroll { overflow-x: auto; }
+.table-scroll table.trades { min-width: 560px; }
+
+@media (max-width: 999px) {
+  .trading-grid { grid-template-columns: minmax(0, 1fr); }
+  .side-column { grid-column: 1; grid-row: auto; }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "status money" "meter meter";
+  }
+  .meter { max-width: none; }
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  .shell, .shell.collapsed { grid-template-columns: 68px minmax(0, 1fr); }
+  .sidebar .nav-text, .sidebar .collapse, .sidebar .cc-logo__word { display: none; }
+  .side-head { flex-direction: column; }
+  .nav-item { justify-content: center; padding: 10px; }
+}
+
+@media (max-width: 767px) {
+  .shell, .shell.collapsed { grid-template-columns: minmax(0, 1fr); }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(280px, 82vw);
+    height: 100dvh;
+    visibility: hidden; /* out of reach of the keyboard while closed */
+    transform: translateX(-105%);
+    transition: transform 0.25s ease, visibility 0.25s;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+  }
+
+  .shell.menu-open .sidebar { visibility: visible; transform: none; }
+  .sidebar .collapse { display: none; }
+
+  /* The desktop's collapsed sidebar does not carry over into the menu. */
+  .shell.collapsed .nav-text, .shell.collapsed .cc-logo__word { display: revert; }
+  .shell.collapsed .side-head { flex-direction: row; }
+  .shell.collapsed .nav-item { justify-content: flex-start; padding: 10px 12px; }
+
+  .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(0, 0, 0, 0.5);
+    animation: fade-in 0.2s ease-out;
+  }
+
+  .menu-btn { display: grid; }
+
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "menu status status" "meter meter money";
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .topbar .chip { padding: 4px 9px; font-size: 11.5px; }
+  .meter > span { display: none; } /* the end labels: the track alone fits a phone */
+  .long, .chip .age { display: none; }
+  .short { display: inline; }
+
+  .content { padding: 12px; }
+  .card { padding: 14px; }
+  .stack, .trading-grid, .side-column { gap: 12px; }
+  .chart-box { height: 300px; }
+
+  .calendar { gap: 3px; }
+  .day { min-height: 50px; padding: 4px; font-size: 10px; }
+  .day b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .day .tag, .day .off { display: none; }
+  .day.holiday::after { /* no room for the name: tap the day to read it */
+    content: '';
+    width: 6px;
+    height: 6px;
+    margin-top: auto;
+    border-radius: 50%;
+    background: var(--warn);
+  }
+
+  .buddy { height: calc(100dvh - 150px); min-height: 380px; }
+  .center.stage { min-height: calc(100dvh - 180px); }
+  .page.behind { height: calc(100dvh - 180px); }
+  .toast { left: 12px; right: 12px; bottom: 12px; }
+
+  /* 16px text stops a phone zooming into a field when it is tapped. */
+  input, select { font-size: 16px; }
+}
+
+@media (max-width: 400px) {
+  .chart-box { height: 240px; }
+}
+
+@media (max-width: 359px) {
+  .form-grid.tight { grid-template-columns: minmax(0, 1fr); }
+}

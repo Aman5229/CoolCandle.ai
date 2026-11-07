@@ -1,0 +1,266 @@
+/* CoolCandle — logo (C · target hit, ring closes) + loader (Trader DNA) */
+
+:root {
+  --cc-ice: #7dd3fc;
+  --cc-mint: #34d399;
+  --cc-coral: #fb7185;
+  --cc-navy: #0b1220;
+  --cc-track: #1e2a3f;
+  --cc-text: #e6eef8;
+  --cc-rung: #334155; /* helix connector lines */
+}
+
+/* ---------- Logo ---------- */
+.cc-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+}
+.cc-logo svg {
+  width: var(--cc-logo-size, 48px);
+  height: var(--cc-logo-size, 48px);
+  flex: none;
+}
+.cc-logo__word {
+  font-weight: 700;
+  font-size: calc(var(--cc-logo-size, 48px) * 0.55);
+  letter-spacing: -0.02em;
+  color: var(--cc-text);
+}
+.cc-logo__word span {
+  color: var(--cc-ice);
+}
+
+.cc-logo .cc-fb {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+/* Default: static C with candle (progress arc full, gap + check hidden) */
+.cc-logo .cc-progress {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.cc-logo .cc-gap {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.cc-logo .cc-check {
+  transform: scale(0);
+}
+
+/* Looping animation: data-play="loop" */
+.cc-logo[data-play="loop"] .cc-progress {
+  animation: ccLoopP 5s cubic-bezier(0.5, 0, 0.3, 1) infinite;
+}
+.cc-logo[data-play="loop"] .cc-gap {
+  animation: ccLoopG 5s ease-out infinite;
+}
+.cc-logo[data-play="loop"] .cc-check {
+  animation: ccLoopK 5s cubic-bezier(0.3, 1.6, 0.5, 1) infinite;
+}
+.cc-logo[data-play="loop"] .cc-candle {
+  animation: ccLoopC 5s infinite;
+}
+
+@keyframes ccLoopP {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  55%,
+  90% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes ccLoopG {
+  0%,
+  55% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  66%,
+  90% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes ccLoopK {
+  0%,
+  66% {
+    transform: scale(0);
+  }
+  74%,
+  90% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(0);
+  }
+}
+@keyframes ccLoopC {
+  0%,
+  66% {
+    opacity: 1;
+  }
+  72%,
+  92% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Play once, then settle back on the static C: data-play="once" */
+.cc-logo[data-play="once"] .cc-progress {
+  animation: ccOnceP 3.2s cubic-bezier(0.5, 0, 0.3, 1) both;
+}
+.cc-logo[data-play="once"] .cc-gap {
+  animation: ccOnceG 3.2s ease-out both;
+}
+.cc-logo[data-play="once"] .cc-check {
+  animation: ccOnceK 3.2s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.cc-logo[data-play="once"] .cc-candle {
+  animation: ccOnceC 3.2s both;
+}
+
+@keyframes ccOnceP {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  45%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes ccOnceG {
+  0%,
+  45% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  58%,
+  82% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes ccOnceK {
+  0%,
+  58% {
+    transform: scale(0);
+  }
+  68%,
+  84% {
+    transform: scale(1);
+  }
+  96%,
+  100% {
+    transform: scale(0);
+  }
+}
+@keyframes ccOnceC {
+  0%,
+  58% {
+    opacity: 1;
+  }
+  64%,
+  86% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Loader ---------- */
+.cc-loader {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.cc-loader svg {
+  width: var(--cc-loader-size, 96px); /* height follows the 3:2 shape */
+  height: auto;
+  aspect-ratio: 3 / 2;
+  overflow: visible;
+}
+.cc-loader__text {
+  font:
+    500 14px/1.4 "Space Grotesk",
+    Inter,
+    system-ui,
+    sans-serif;
+  color: #94a3b8;
+  margin: 0;
+}
+/* Trader DNA: each column flips top-to-bottom; staggered delays make a helix */
+.cc-loader .cc-helix {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: ccHelix 2.4s ease-in-out infinite alternate;
+}
+@keyframes ccHelix {
+  from {
+    transform: scaleY(1);
+  }
+  to {
+    transform: scaleY(-1);
+  }
+}
+
+/* Full-page overlay (shown by CoolCandleLoader.show()) */
+.cc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 18, 32, 0.72);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
+}
+.cc-overlay.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Respect reduced-motion settings */
+@media (prefers-reduced-motion: reduce) {
+  .cc-logo *,
+  .cc-loader * {
+    animation: none !important;
+  }
+}
+
+/* Visually hidden text for screen readers */
+.cc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
