@@ -1,0 +1,1 @@
+"""CoolCandle.ai backend."""

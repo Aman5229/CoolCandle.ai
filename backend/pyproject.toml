@@ -1,0 +1,113 @@
+[project]
+name = "coolcandle"
+version = "0.1.0"
+description = "CoolCandle.ai backend: overtrading guard for Indian index options"
+authors = [
+    { name = "aman-patel", email = "amanpatel5229@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "alembic>=1.20.1",
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.32.0",
+    "cryptography>=50.0.2",
+    "fastapi>=0.162.0",
+    "httpx2>=2.16.0",
+    "kotakneoapi>=3.0.13",
+    "pyarrow>=26.0.1",
+    "pydantic-settings>=2.16.2",
+    "pyotp>=2.10.0",
+    "sqlalchemy[asyncio]>=2.1.8",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "httpx2>=2.16.0",
+    "hypothesis>=6.170.15",
+    "import-linter>=2.16",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["src/coolcandle/db/migrations/versions"]
+
+[tool.ruff.lint]
+# pycodestyle errors, pyflakes, import sorting, modern syntax, common bug patterns
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore:Dialect sqlite\\+aiosqlite does \\*not\\* support Decimal"]
+
+[project.scripts]
+coolcandle = "coolcandle.cli:main"
+
+[tool.importlinter]
+root_package = "coolcandle"
+
+[[tool.importlinter.contracts]]
+name = "The domain layer is pure"
+type = "forbidden"
+source_modules = ["coolcandle.domain"]
+forbidden_modules = [
+    "coolcandle.ports",
+    "coolcandle.services",
+    "coolcandle.adapters",
+    "coolcandle.api",
+    "coolcandle.db",
+    "coolcandle.config",
+    "coolcandle.main",
+]
+
+[[tool.importlinter.contracts]]
+name = "Ports only know the domain"
+type = "forbidden"
+source_modules = ["coolcandle.ports"]
+forbidden_modules = [
+    "coolcandle.services",
+    "coolcandle.adapters",
+    "coolcandle.api",
+    "coolcandle.db",
+    "coolcandle.main",
+]
+
+[[tool.importlinter.contracts]]
+name = "Services never import adapters"
+type = "forbidden"
+source_modules = ["coolcandle.services"]
+forbidden_modules = ["coolcandle.adapters", "coolcandle.api", "coolcandle.main"]
+
+[[tool.importlinter.contracts]]
+name = "Adapters do not reach into services"
+type = "forbidden"
+source_modules = ["coolcandle.adapters"]
+forbidden_modules = ["coolcandle.services", "coolcandle.api", "coolcandle.db", "coolcandle.main"]
+
+[[tool.importlinter.contracts]]
+name = "The API goes through services"
+type = "forbidden"
+source_modules = ["coolcandle.api"]
+forbidden_modules = ["coolcandle.adapters", "coolcandle.db", "coolcandle.main"]
+allow_indirect_imports = true
