@@ -79,6 +79,7 @@ more users and brokers can be added without a rewrite, but sign-up is closed in 
 | D13 | Build approach | **All versions built together** (Aman, 7 Nov 2026), ahead of the order in §3. Nothing goes live on the strength of being built: each version's "done when" still applies, and live trailing stays off until Kotak confirms it is allowed. | **CONFIRMED** |
 | D14 | Extra entry rules | From the day-trading reference: no entries before `entry_start` (09:20), reward to risk at least `min_reward_risk` (1), and a stop at least 0.5% from the entry. Sizing reports which limit decided it, and also respects cash and freeze quantity. | DEFAULT |
 | D15 | Where the buddy runs | **Its own service**, `agent/` (Aman, 7 Nov 2026): the model, the conversation and the number check run there, with no database, no broker and no Kotak credentials. Core keeps every tool behind an internal route that answers only during the chat that called it (ADR 0004). **Text chat first; voice is added once the chat has been reviewed.** | **CONFIRMED** |
+| D16 | Skill Test practice mode | A separate fake-funds arena on **Binance** live and replayed prices, with session plans, the same lock rules and a discipline score. Fully isolated from live. Full spec: `docs/SKILL_TEST.md`. | **CONFIRMED** (Aman, 7 Nov 2026) |
 
 When Aman confirms or changes a row, update the table and the sections that depend on it.
 
