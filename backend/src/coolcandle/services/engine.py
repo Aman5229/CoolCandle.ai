@@ -103,7 +103,7 @@ class Engine:
         day = self.calendar.trading_date(self.clock.now())
         await self.book.load(account_id, mode, day)
         await self.guard.load(account_id, mode)
-        await self.plans.get(account_id)
+        await self.plans.get(account_id, mode)
         if mode is Mode.PAPER:
             rows = await self.book.day_orders(account_id, mode, day)
             self.brokers.paper(account_id).restore(
@@ -172,7 +172,7 @@ class Engine:
         self.bus.publish("tick", tick.model_dump(mode="json"))
 
         await self.pump()
-        await self.orders.on_tick(tick.instrument_key, tick.ltp)
+        await self.orders.on_tick(tick.instrument_key, tick.ltp, tick.bid)
         await self.trailing.on_tick(tick.instrument_key, tick.ltp)
 
         underlying = self._indices.get(tick.instrument_key)

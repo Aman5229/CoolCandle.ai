@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from coolcandle.domain.calendar import ist_datetime
 from coolcandle.domain.costs import CostRates
 from coolcandle.domain.events import MarketEvent
+from coolcandle.domain.exits import floor_tick, stop_limit_price
 from coolcandle.domain.guard import (
     DayState,
     GuardConfig,
@@ -31,7 +32,7 @@ from coolcandle.domain.models import (
     Side,
 )
 from coolcandle.domain.plan import DailyPlan, PlanStatus
-from coolcandle.domain.sizing import worst_case_loss
+from coolcandle.domain.sizing import stop_range, worst_case_loss
 
 DAY = date(2026, 11, 11)
 CONFIG = GuardConfig()
@@ -394,8 +395,6 @@ def test_an_allowed_entry_can_never_breach_the_loss_limit(
     )
     if not decision.allowed:
         return
-    from coolcandle.domain.exits import stop_limit_price
-
     limit = stop_limit_price(stop, Decimal("0.05"), CONFIG.stop_limit_pct)
     worst = worst_case_loss(entry_price, limit, count * 65, CONFIG.slippage_points, RATES)
     assert net - worst >= -plan().loss_limit
@@ -437,3 +436,82 @@ def test_exits_are_always_allowed(
     snap = snapshot(15, 25, net_pnl=net, feed_age=feed)
     assert evaluate(plan(), snap, request, ctx, CONFIG).allowed
     assert evaluate(None, snap, request, ctx, CONFIG).allowed
+
+
+# --- the stop range the ticket shows -----------------------------------------
+
+TICK = Decimal("0.05")
+
+
+def allowed_stops(
+    entry_price: Decimal, qty: int, budget: Decimal
+) -> tuple[Decimal, Decimal] | None:
+    return stop_range(
+        entry_price,
+        qty,
+        TICK,
+        budget,
+        RATES,
+        stop_limit_pct=CONFIG.stop_limit_pct,
+        min_stop_pct=CONFIG.min_stop_pct,
+        slippage_points=CONFIG.slippage_points,
+    )
+
+
+def test_the_worst_case_counts_the_stop_limit_gap_slippage_and_charges() -> None:
+    """The ticket that was refused: a 3.40-point stop on a 100.40 call, one lot of 65. The SL
+    order's limit sits 2% under the trigger (95.05) and two more points go to slippage, so the
+    worst case is 7.35 points a unit, plus charges."""
+    limit = stop_limit_price(Decimal("97"), TICK, CONFIG.stop_limit_pct)
+    assert limit == Decimal("95.05")
+    worst = worst_case_loss(Decimal("100.40"), limit, 65, CONFIG.slippage_points, RATES)
+    assert worst == Decimal("516.08")
+    assert allowed_stops(Decimal("100.40"), 65, Decimal("300")) is None
+
+
+def test_a_cheaper_option_has_room_for_a_stop() -> None:
+    assert allowed_stops(Decimal("21.50"), 65, Decimal("300")) == (
+        Decimal("19.70"),
+        Decimal("21.35"),
+    )
+
+
+def test_no_stop_fits_without_a_budget() -> None:
+    assert allowed_stops(Decimal("50"), 65, Decimal("0")) is None
+    assert allowed_stops(Decimal("50"), 0, Decimal("300")) is None
+
+
+RANGE_CODES = {"STOP_SIDE", "STOP_TOO_TIGHT", "MAX_LOSS", "DAY_BUDGET"}
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    net=st.decimals(min_value=-2990, max_value=4990, places=2, allow_nan=False),
+    entry_price=price,
+    count=lots,
+    per_trade=st.integers(100, 3000),
+)
+def test_the_stop_range_is_exactly_what_the_guard_allows(
+    net: Decimal, entry_price: Decimal, count: int, per_trade: int
+) -> None:
+    day = plan(max_loss_per_trade=Decimal(per_trade))
+    qty = count * 65
+    budget = min(day.max_loss_per_trade, day.loss_limit + net)
+
+    def range_codes(stop: Decimal) -> set[str]:
+        request = entry(price=entry_price, stop=stop, qty=qty)
+        decision = evaluate(day, snapshot(net_pnl=net), request, context(ltp=entry_price), CONFIG)
+        return {reason.code for reason in decision.reasons} & RANGE_CODES
+
+    found = allowed_stops(entry_price, qty, budget)
+    if found is None:
+        tightest = floor_tick(entry_price * (100 - CONFIG.min_stop_pct) / 100, TICK)
+        if tightest >= TICK:
+            assert range_codes(tightest) & {"MAX_LOSS", "DAY_BUDGET"}
+        return
+    lowest, highest = found
+    assert range_codes(lowest) == set()
+    assert range_codes(highest) == set()
+    if lowest - TICK >= TICK:
+        assert range_codes(lowest - TICK) & {"MAX_LOSS", "DAY_BUDGET"}
+    assert range_codes(highest + TICK) & {"STOP_TOO_TIGHT", "STOP_SIDE"}

@@ -41,7 +41,7 @@ class DayMonitor:
         self._last_sent: dict[tuple[str, Mode], str] = {}
 
     async def check(self, account_id: str, mode: Mode) -> None:
-        plan = await self.plans.get(account_id)
+        plan = await self.plans.get(account_id, mode)
         reason = self.guard.lock_reason(account_id, mode)
         if reason is not None:
             # A crash can leave trades open after the lock row: keep finishing the job.

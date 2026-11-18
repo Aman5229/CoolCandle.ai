@@ -101,11 +101,18 @@ class BrokerAccount(Row):
 
 
 class DailyPlanRow(Row):
+    """One plan per account, day and mode: paper can be edited freely, live only gets stricter."""
+
     __tablename__ = "daily_plans"
-    __table_args__ = (UniqueConstraint("broker_account_id", "trading_date"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "broker_account_id", "trading_date", "mode", name="uq_daily_plans_account_day_mode"
+        ),
+    )
 
     broker_account_id: Mapped[str] = mapped_column(ForeignKey("broker_accounts.id"))
     trading_date: Mapped[date] = mapped_column(Date)
+    mode: Mapped[str] = mapped_column(String(8))
     profit_target: Mapped[Decimal] = mapped_column(Money)
     loss_limit: Mapped[Decimal] = mapped_column(Money)
     max_trades: Mapped[int] = mapped_column(Integer)
@@ -278,3 +285,98 @@ class Experiment(Row):
     data_from: Mapped[date] = mapped_column(Date)
     data_to: Mapped[date] = mapped_column(Date)
     metrics: Mapped[dict[str, Any]] = mapped_column(Json)
+
+
+# --- Skill Test: its own world. Nothing below is read or written by live trading. ---------------
+
+
+class SkillAccount(Row):
+    __tablename__ = "skill_accounts"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
+    settings: Mapped[dict[str, Any]] = mapped_column(Json, default=dict)
+
+
+class SkillRun(Row):
+    __tablename__ = "skill_runs"
+    __table_args__ = (UniqueConstraint("account_id", "number"),)
+
+    account_id: Mapped[str] = mapped_column(ForeignKey("skill_accounts.id"), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    start_fund: Mapped[Decimal] = mapped_column(Money)
+    cash: Mapped[Decimal] = mapped_column(
+        Money
+    )  # start fund plus every closed trade, after charges
+    status: Mapped[str] = mapped_column(String(8))
+    today: Mapped[date] = mapped_column(Date)  # the replayed day the next session plays
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    peak_equity: Mapped[Decimal] = mapped_column(Money)
+
+
+class SkillSession(Row):
+    __tablename__ = "skill_sessions"
+
+    run_id: Mapped[str] = mapped_column(ForeignKey("skill_runs.id"), index=True)
+    index: Mapped[str] = mapped_column(String(8))  # NIFTY or SENSEX
+    day: Mapped[date] = mapped_column(Date)
+    replay_cursor: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    speed: Mapped[int] = mapped_column(Integer, default=1)
+    plan: Mapped[dict[str, Any]] = mapped_column(Json)
+    plan_status: Mapped[str] = mapped_column(String(16))
+    state: Mapped[str] = mapped_column(String(16))
+    lock_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    start_equity: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    end_equity: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_breakdown: Mapped[list[Any] | None] = mapped_column(Json, nullable=True)
+
+
+class SkillTradeRow(Row):
+    __tablename__ = "skill_trades"
+
+    session_id: Mapped[str] = mapped_column(ForeignKey("skill_sessions.id"), index=True)
+    instrument_key: Mapped[str] = mapped_column(String(64))
+    trading_symbol: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))  # PENDING, OPEN, CLOSED, CANCELLED
+    qty: Mapped[int] = mapped_column(Integer)
+    entry: Mapped[Decimal | None] = mapped_column(Price, nullable=True)
+    stop_at_fill: Mapped[Decimal] = mapped_column(Price)
+    stop: Mapped[Decimal] = mapped_column(Price)
+    target: Mapped[Decimal | None] = mapped_column(Price, nullable=True)
+    exit: Mapped[Decimal | None] = mapped_column(Price, nullable=True)
+    r_risk: Mapped[Decimal] = mapped_column(Money)
+    pnl: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
+    fees: Mapped[Decimal] = mapped_column(Money, default=Decimal("0"))
+    opened_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+    exit_kind: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    stop_widened: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class SkillOrder(Row):
+    __tablename__ = "skill_orders"
+    __table_args__ = (UniqueConstraint("session_id", "broker_order_id"),)
+
+    session_id: Mapped[str] = mapped_column(ForeignKey("skill_sessions.id"), index=True)
+    trade_id: Mapped[str | None] = mapped_column(ForeignKey("skill_trades.id"), nullable=True)
+    role: Mapped[str] = mapped_column(String(8))  # ENTRY, STOP, TARGET
+    broker_order_id: Mapped[str] = mapped_column(String(32))
+    request: Mapped[dict[str, Any]] = mapped_column(Json)
+    status: Mapped[str] = mapped_column(String(16))
+    filled_qty: Mapped[int] = mapped_column(Integer, default=0)
+    avg_price: Mapped[Decimal | None] = mapped_column(Price, nullable=True)
+    ts: Mapped[datetime] = mapped_column(UtcDateTime)
+
+
+class SkillEventRow(Row):
+    __tablename__ = "skill_events"
+    __table_args__ = (Index("ix_skill_events_session_ts", "session_id", "ts"),)
+
+    session_id: Mapped[str] = mapped_column(ForeignKey("skill_sessions.id"))
+    ts: Mapped[datetime] = mapped_column(UtcDateTime)
+    kind: Mapped[str] = mapped_column(String(16))
+    trade_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(Json, default=dict)

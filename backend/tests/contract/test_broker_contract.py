@@ -16,6 +16,7 @@ from coolcandle.adapters.brokers.kotak_neo.broker import KotakBroker
 from coolcandle.adapters.brokers.kotak_neo.mapping import (
     check,
     order_from_kotak,
+    plain_reason,
     position_from_kotak,
     rows,
 )
@@ -234,6 +235,46 @@ async def test_a_clear_refusal_is_a_broker_error_and_not_unknown() -> None:
     assert "margin" in str(refused.value)
 
 
+async def test_an_unauthorized_order_names_the_registered_ip_rule() -> None:
+    """What Kotak sent for an order from an IP not in its Trade API settings."""
+    broker = KotakBroker(ManualClock(NOW))
+
+    class Unregistered(FakeNeo):
+        def place_order(self, **kwargs: Any) -> dict[str, Any]:
+            return {"stCode": 100008, "errMsg": "unauthorized", "stat": "Not_Ok"}
+
+    broker.client = Unregistered()
+    with pytest.raises(BrokerError) as refused:
+        await broker.place_order(buy())
+    assert not isinstance(refused.value, BrokerUnknownOutcome)
+    assert "registered in its Trade API settings" in str(refused.value)
+
+
+def test_kotak_is_always_reached_over_ipv4(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seen 16 Nov 2026: Kotak's servers have IPv6 addresses too, and orders sent over IPv6 came
+    from an address not in the Trade API whitelist and were refused."""
+    from coolcandle.adapters.brokers.kotak_neo import client as kotak_client
+
+    made: dict[str, Any] = {}
+
+    class Recorded:
+        def __init__(self, **kwargs: Any) -> None:
+            made.update(kwargs)
+
+        def totp_login(self, **kwargs: Any) -> dict[str, Any]:
+            return {"data": {}}
+
+        def totp_validate(self, **kwargs: Any) -> dict[str, Any]:
+            return {"data": {}}
+
+    monkeypatch.setattr(kotak_client, "NeoAPI", Recorded)
+    kotak_client.login(
+        {"consumer_key": "k", "mobile_number": "m", "ucc": "u", "mpin": "p"}, "123456"
+    )
+    # httpx binds a transport's connections to its local address: 0.0.0.0 allows IPv4 only.
+    assert made["transport"]._pool._local_address == "0.0.0.0"
+
+
 async def test_the_sdk_is_never_called_twice_for_one_order() -> None:
     broker = KotakBroker(ManualClock(NOW))
     fake = FakeNeo()
@@ -282,6 +323,38 @@ def test_a_rejection_keeps_the_reason() -> None:
     }
     order = order_from_kotak(row, NOW)
     assert order.reject_reason == "RMS"
+
+
+MARGIN = (
+    "RMS:Margin Exceeds,Cash Available:5978.55,Additional margin required:823.32 for entity "
+    "account-X2B0H across exchange across segment across product "
+)
+
+
+def test_a_margin_shortfall_is_said_plainly_with_its_numbers() -> None:
+    """The exact text Kotak sent on 16 Nov 2026."""
+    assert plain_reason(MARGIN) == (
+        "Not enough funds in Kotak: ₹5,978.55 available, ₹823.32 more needed"
+    )
+    assert plain_reason("RMS: blocked scrip") == "RMS: blocked scrip"
+
+
+def test_a_margin_rejection_in_the_order_book_reads_plainly() -> None:
+    row = {"nOrdNo": "1", "ordSt": "rejected", "rejRsn": MARGIN, "qty": "65", "trnsTp": "B"}
+    reason = order_from_kotak(row, NOW).reject_reason
+    assert reason is not None and reason.startswith("Not enough funds in Kotak")
+
+
+async def test_a_margin_refusal_at_placing_reads_plainly() -> None:
+    broker = KotakBroker(ManualClock(NOW))
+
+    class Short(FakeNeo):
+        def place_order(self, **kwargs: Any) -> dict[str, Any]:
+            return {"stat": "Not_Ok", "emsg": MARGIN}
+
+    broker.client = Short()
+    with pytest.raises(BrokerError, match="Not enough funds in Kotak"):
+        await broker.place_order(buy())
 
 
 def test_position_pnl_includes_the_price_factor() -> None:

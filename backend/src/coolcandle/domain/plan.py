@@ -1,11 +1,12 @@
 """The daily plan: validation, the two confirmations, and stricter-only edits."""
 
+from collections.abc import Sequence
 from datetime import date, time
 from decimal import Decimal
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from coolcandle.domain.models import Frozen
 
@@ -49,7 +50,8 @@ class DailyPlan(Frozen):
             raise ValueError("max loss per trade cannot be above the day's loss limit")
         if not self.entry_start < self.entry_cutoff < self.square_off <= LATEST_SQUARE_OFF:
             raise ValueError(
-                "times must run entry start, entry cutoff, square-off, and end by 15:20"
+                "times must run in order: no entries before, no entries after, then square off, "
+                "by 15:20 at the latest"
             )
         if not self.allowed_underlyings:
             raise ValueError("allow at least one underlying")
@@ -86,17 +88,51 @@ _LOWER_IS_STRICTER = (
 _HIGHER_IS_STRICTER = ("entry_start", "cool_off_minutes", "min_reward_risk")
 
 
-def stricter_changes(old: DailyPlan, new: DailyPlan) -> list[tuple[str, str, str]]:
-    """The (field, old, new) edits to a locked plan. Anything looser is refused."""
+def plan_changes(old: DailyPlan, new: DailyPlan) -> list[tuple[str, str, str]]:
+    """Every (field, old, new) edit, looser or stricter. Only a paper plan takes these once
+    locked; a live plan goes through `stricter_changes`."""
     changes: list[tuple[str, str, str]] = []
-    for field in (*_LOWER_IS_STRICTER, *_HIGHER_IS_STRICTER):
+    for field in (*_LOWER_IS_STRICTER, *_HIGHER_IS_STRICTER, "trail_at_target"):
+        before, after = getattr(old, field), getattr(new, field)
+        if before != after:
+            changes.append((field, str(before), str(after)))
+    if set(new.allowed_underlyings) != set(old.allowed_underlyings):
+        changes.append(
+            (
+                "allowed_underlyings",
+                ",".join(old.allowed_underlyings),
+                ",".join(new.allowed_underlyings),
+            )
+        )
+    return changes
+
+
+def tighter_only(
+    old: BaseModel,
+    new: BaseModel,
+    lower_is_stricter: Sequence[str],
+    higher_is_stricter: Sequence[str],
+    message: str,
+) -> list[tuple[str, str, str]]:
+    """The (field, old, new) edits between two plans, refusing any that loosens one. Shared by
+    the live day plan and the Skill Test session plan."""
+    changes: list[tuple[str, str, str]] = []
+    for field in (*lower_is_stricter, *higher_is_stricter):
         before, after = getattr(old, field), getattr(new, field)
         if before == after:
             continue
-        looser = after > before if field in _LOWER_IS_STRICTER else after < before
+        looser = after > before if field in lower_is_stricter else after < before
         if looser:
-            raise PlanError("PLAN_LOCKED", "The plan is locked for today")
+            raise PlanError("PLAN_LOCKED", message)
         changes.append((field, str(before), str(after)))
+    return changes
+
+
+def stricter_changes(old: DailyPlan, new: DailyPlan) -> list[tuple[str, str, str]]:
+    """The (field, old, new) edits to a locked plan. Anything looser is refused."""
+    changes = tighter_only(
+        old, new, _LOWER_IS_STRICTER, _HIGHER_IS_STRICTER, "The plan is locked for today"
+    )
 
     if not set(new.allowed_underlyings) <= set(old.allowed_underlyings):
         raise PlanError("PLAN_LOCKED", "The plan is locked for today")

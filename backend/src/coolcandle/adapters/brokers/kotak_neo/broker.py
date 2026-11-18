@@ -12,6 +12,7 @@ from coolcandle.adapters.brokers.kotak_neo.mapping import (
     ORDER_TYPES,
     check,
     order_from_kotak,
+    plain_reason,
     position_from_kotak,
     rows,
     to_decimal,
@@ -37,6 +38,11 @@ log = logging.getLogger(__name__)
 PRODUCT = "MIS"
 VALIDITY = "DAY"
 POSITIONS_TTL = timedelta(seconds=1.5)
+
+
+UNREGISTERED_IP = (
+    "Kotak takes API orders only from the IP address registered in its Trade API settings"
+)
 
 
 class KotakBroker:
@@ -134,7 +140,14 @@ class KotakBroker:
         if isinstance(response, dict) and ("Error" in response or "error" in response):
             # The SDK turns network failures into error dicts, so the order may still exist.
             raise BrokerUnknownOutcome("Kotak returned an error with no order number")
-        body = check(response, "order")
+        try:
+            body = check(response, "order")
+        except BrokerError as exc:
+            reason = plain_reason(str(exc))
+            # Seen 16 Nov 2026 on an order sent from an unregistered IP: HTTP 401, stCode 100008.
+            if "unauthorized" in reason.lower():
+                reason = f"{reason}. {UNREGISTERED_IP}"
+            raise BrokerError(reason) from exc
         broker_id = body.get("nOrdNo")
         if not broker_id:
             raise BrokerUnknownOutcome("Kotak did not return an order number")

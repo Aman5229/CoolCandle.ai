@@ -17,7 +17,7 @@ os.environ.setdefault("COOLCANDLE_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 from coolcandle.adapters.clock import ManualClock  # noqa: E402
 from coolcandle.config import Settings  # noqa: E402
 from coolcandle.db.tables import Base, BrokerAccount, User  # noqa: E402
-from coolcandle.domain.calendar import ist_datetime  # noqa: E402
+from coolcandle.domain.calendar import ist_datetime, to_ist  # noqa: E402
 from coolcandle.domain.models import (  # noqa: E402
     Candle,
     EntryTicket,
@@ -29,6 +29,7 @@ from coolcandle.domain.models import (  # noqa: E402
     Trade,
 )
 from coolcandle.domain.plan import DailyPlan  # noqa: E402
+from coolcandle.domain.skill.charts import fold  # noqa: E402
 from coolcandle.main import Container, build  # noqa: E402
 
 DAY = date(2026, 11, 11)  # a Wednesday, and a trading day
@@ -91,6 +92,26 @@ class FakeMarket:
         return []
 
 
+class FakeIndexData:
+    """Stored index minutes from memory instead of Parquet files. Nothing calls Kotak in a test."""
+
+    def __init__(self) -> None:
+        self.minutes: dict[str, list[Candle]] = {}
+
+    def add(self, index: str, candles: list[Candle]) -> None:
+        merged = {c.start: c for c in [*self.minutes.get(index, []), *candles]}
+        self.minutes[index] = [merged[start] for start in sorted(merged)]
+
+    def days(self, index: str) -> list[date]:
+        return sorted({to_ist(c.start).date() for c in self.minutes.get(index, [])})
+
+    def window(self, index: str, start: datetime, end: datetime) -> list[Candle]:
+        return [c for c in self.minutes.get(index, []) if start <= c.start < end]
+
+    def bars(self, index: str, interval: str, start: datetime, end: datetime) -> list[Candle]:
+        return fold(self.window(index, start, end), interval)
+
+
 def plan_values(**changes: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "profit_target": Decimal("5000"),
@@ -107,11 +128,12 @@ class Harness:
     clock: ManualClock
     account_id: str
     mode: Mode = Mode.PAPER
+    user_id: str = ""
 
     async def lock_plan(self, **changes: Any) -> DailyPlan:
-        await self.app.plans.save_draft(self.account_id, plan_values(**changes))
-        await self.app.plans.confirm(self.account_id, 1, None)
-        return await self.app.plans.confirm(self.account_id, 2, "LOCK")
+        await self.app.plans.save_draft(self.account_id, self.mode, plan_values(**changes))
+        await self.app.plans.confirm(self.account_id, self.mode, 1, None)
+        return await self.app.plans.confirm(self.account_id, self.mode, 2, "LOCK")
 
     async def tick(
         self,
@@ -174,7 +196,12 @@ TEST_DATABASE = os.environ.get("COOLCANDLE_TEST_DATABASE_URL", "sqlite+aiosqlite
 async def make_harness(database_url: str = TEST_DATABASE) -> Harness:
     settings = make_settings(database_url=database_url)
     clock = ManualClock(ist_datetime(DAY, time(10, 0)))
-    app = build(settings, clock=clock, market=FakeMarket())
+    app = build(
+        settings,
+        clock=clock,
+        market=FakeMarket(),
+        skill_history=FakeIndexData(),
+    )
     app.engine.recorder = None
     async with app.db.kw["bind"].begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
@@ -187,10 +214,11 @@ async def make_harness(database_url: str = TEST_DATABASE) -> Harness:
         session.add(account)
         await session.flush()
         account_id = account.id
+        user_id = user.id
     await app.engine.feed.use(FakeMarket())
     app.engine._indices = {NIFTY: "NIFTY"}
     await app.engine.refresh_accounts()
-    return Harness(app=app, clock=clock, account_id=account_id)
+    return Harness(app=app, clock=clock, account_id=account_id, user_id=user_id)
 
 
 @pytest.fixture

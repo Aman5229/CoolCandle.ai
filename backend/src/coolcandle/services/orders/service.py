@@ -29,7 +29,7 @@ from coolcandle.domain.models import (
     Side,
     Trade,
 )
-from coolcandle.domain.sizing import SizeResult, max_lots, worst_case_loss
+from coolcandle.domain.sizing import SizeResult, max_lots, stop_range, worst_case_loss
 from coolcandle.domain.trade_state import TradeEvent, TradeState, next_state
 from coolcandle.domain.trailing import trails_past_target
 from coolcandle.ports.broker import Broker, BrokerError, BrokerUnknownOutcome
@@ -72,10 +72,21 @@ class Preview(Frozen):
     decision: Decision
     size: SizeResult | None
     qty: int
+    stop: Decimal  # the trigger checked: typed, or the plan's
     stop_limit: Decimal
-    worst_case: Decimal
+    worst_case: Decimal  # to_stop_limit + slippage + charges
+    to_stop_limit: Decimal  # the fall from the entry to the stop order's limit
+    slippage: Decimal  # the buffer for a stop that fills below its limit
     charges: Decimal
     reward_risk: Decimal | None
+
+
+class StopRange(Frozen):
+    """The stops the guard allows right now for this many lots at this entry."""
+
+    lowest: Decimal | None  # None: no stop fits
+    highest: Decimal | None
+    budget: Decimal  # the most this trade may lose: per-trade limit or what is left today
 
 
 def _advance(trade: Trade, event: TradeEvent, **changes: object) -> Trade:
@@ -189,7 +200,7 @@ class OrderService:
             ticket.stop_trigger, instrument.tick_size, self.config.stop_limit_pct
         )
         qty = request.qty
-        plan = await self.plans.get(account_id)
+        plan = await self.plans.get(account_id, mode)
         buffer = self.config.slippage_points
         size = None
         if plan is not None:
@@ -215,11 +226,57 @@ class OrderService:
             decision=decision,
             size=size,
             qty=qty,
+            stop=ticket.stop_trigger,
             stop_limit=limit,
             worst_case=worst_case_loss(ticket.limit_price, limit, qty, buffer, self.rates),
+            to_stop_limit=(ticket.limit_price - limit) * qty,
+            slippage=buffer * qty,
             charges=round_trip(ticket.limit_price, limit, qty, self.rates),
             reward_risk=reward_risk,
         )
+
+    async def stop_range(
+        self, account_id: str, mode: Mode, key: str, lots: int, entry: Decimal
+    ) -> StopRange | None:
+        """Shown before a stop is typed, so a refusal never comes as a surprise. None until
+        today's plan exists."""
+        instrument = self._instrument(key)
+        plan = await self.plans.get(account_id, mode)
+        if plan is None:
+            return None
+        snapshot = await self.guard.snapshot(account_id, mode)
+        budget = min(plan.max_loss_per_trade, plan.loss_limit + snapshot.net_pnl)
+        allowed = stop_range(
+            entry,
+            lots * instrument.lot_size,
+            instrument.tick_size,
+            budget,
+            self.rates,
+            stop_limit_pct=self.config.stop_limit_pct,
+            min_stop_pct=self.config.min_stop_pct,
+            slippage_points=slippage_points(
+                plan, self.guard.events.on(plan.trading_date), self.config
+            ),
+        )
+        lowest, highest = allowed or (None, None)
+        return StopRange(lowest=lowest, highest=highest, budget=budget)
+
+    async def plan_stop(
+        self, account_id: str, mode: Mode, key: str, lots: int, entry: Decimal
+    ) -> Decimal:
+        """The stop a ticket gets when none is typed: the furthest one the plan allows, so the
+        worst case uses the whole per-trade limit (or what is left of today's, if smaller)."""
+        found = await self.stop_range(account_id, mode, key, lots, entry)
+        if found is None:
+            raise TradeError("NO_PLAN", "Lock today's plan before placing orders")
+        if found.lowest is None:
+            size = f"{lots} lot{'' if lots == 1 else 's'}"
+            raise TradeError(
+                "NO_STOP_FITS",
+                f"No stop fits your ₹{found.budget:.2f} for {size} at {entry}: "
+                "pick a cheaper strike",
+            )
+        return found.lowest
 
     # --- entry ---------------------------------------------------------------
 
@@ -277,9 +334,11 @@ class OrderService:
                 return await self._adopt_or_flag(trade, order_id, request, str(exc))
             except BrokerError as exc:
                 await self.book.fail_order(order_id, str(exc))
-                return await self.book.save(
+                await self.book.save(
                     _advance(trade, TradeEvent.REJECT), "ENTRY_REJECTED", {"reason": str(exc)}
                 )
+                # A refusal is not a success: say so, so no screen shows a trade that never was.
+                raise TradeError("BROKER_REJECTED", f"The broker refused the order: {exc}") from exc
             await self.book.bind_order(trade, Role.ENTRY, order_id, placed)
             await self.audit.write(
                 "order_placed", self.clock.now(), data={"trade": trade.id, "mode": mode}
@@ -630,14 +689,17 @@ class OrderService:
 
     # --- ticks and timers ----------------------------------------------------
 
-    async def on_tick(self, key: str, ltp: Decimal) -> None:
+    async def on_tick(self, key: str, ltp: Decimal, bid: Decimal | None = None) -> None:
         """Target exits, and noticing a crossed stop. Called for every tick."""
+        # The exit sells at the bid, so wait for the bid to reach the target: the trade then
+        # leaves at the target or above, not at a last trade the bid has not followed.
+        sell_price = bid if bid is not None else ltp
         for trade in self.book.for_instrument(key):
             if trade.state is not TradeState.OPEN or not self._reachable(trade):
                 continue
             if (
                 trade.target is not None
-                and ltp >= trade.target
+                and sell_price >= trade.target
                 and not trails_past_target(trade.trailing)
             ):
                 await self.exit_trade(trade.id, ExitReason.TARGET)

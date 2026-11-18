@@ -81,7 +81,7 @@ class TicketBody(BaseModel):
     instrument_key: str
     lots: int = Field(gt=0)
     limit_price: Decimal = Field(gt=0)
-    stop_trigger: Decimal = Field(gt=0)
+    stop_trigger: Decimal | None = Field(default=None, gt=0)  # None: the plan's stop
     target: Decimal | None = None
     trailing: TrailingRule | None = None
 

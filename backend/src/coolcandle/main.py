@@ -1,10 +1,11 @@
 """The app factory, and the one place that wires ports to adapters."""
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from decimal import Decimal
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,26 +17,29 @@ from coolcandle.adapters.brokers.catalog import CATALOG
 from coolcandle.adapters.brokers.kotak_neo.broker import KotakBroker
 from coolcandle.adapters.brokers.kotak_neo.feed import KotakMarketData
 from coolcandle.adapters.brokers.paper.broker import PaperBroker
-from coolcandle.adapters.clock import SimClock, SystemClock
+from coolcandle.adapters.clock import ManualClock, SimClock, SystemClock
+from coolcandle.adapters.market.history.replay import CandleReplay
+from coolcandle.adapters.market.history.store import IndexHistory
 from coolcandle.adapters.market.idle import IdleMarket
 from coolcandle.adapters.market.sim import SimulatedMarket
 from coolcandle.adapters.news.rss import RssSource
 from coolcandle.adapters.notify.telegram import TelegramNotifier
 from coolcandle.api.errors import add_handlers
 from coolcandle.api.routes import agent as agent_routes
-from coolcandle.api.routes import auth, brokers, health, market, plan, signals, trades
+from coolcandle.api.routes import auth, brokers, health, market, plan, signals, skill, trades
 from coolcandle.api.routes import settings as settings_routes
 from coolcandle.api.ws import router as ws_router
 from coolcandle.config import Settings
 from coolcandle.db.session import Sessions, make_engine, make_sessions
-from coolcandle.db.tables import Holiday, MarketEventRow
+from coolcandle.db.tables import BrokerAccount, Holiday, MarketEventRow
 from coolcandle.domain.calendar import MarketCalendar, ist_datetime
 from coolcandle.domain.costs import CostRates
 from coolcandle.domain.guard import GuardConfig
-from coolcandle.domain.models import Mode
+from coolcandle.domain.models import Candle, Instrument, Mode, Tick
 from coolcandle.domain.setups.level_breakout import LevelBreakout
 from coolcandle.domain.setups.opening_range import OpeningRangeBreakout
 from coolcandle.domain.signals import SignalConfig
+from coolcandle.domain.skill.models import SkillSettings, StopSide
 from coolcandle.logs import setup_logging
 from coolcandle.ports.agent import Agent
 from coolcandle.ports.broker import Broker, BrokerSpec
@@ -44,6 +48,7 @@ from coolcandle.ports.market_data import MarketData
 from coolcandle.ports.news_source import NewsSource
 from coolcandle.ports.notifier import Notifier
 from coolcandle.ports.signal_source import SignalSource
+from coolcandle.ports.skill import IndexData
 from coolcandle.services.accounts.service import AccountService
 from coolcandle.services.accounts.vault import Vault
 from coolcandle.services.agent.service import AgentService
@@ -71,6 +76,8 @@ from coolcandle.services.recorder.recorder import Recorder
 from coolcandle.services.scheduler.service import Job, Scheduler
 from coolcandle.services.settings import SettingsStore
 from coolcandle.services.signals.service import SignalService
+from coolcandle.services.skill.service import SkillService
+from coolcandle.services.skill.store import SkillStore
 from coolcandle.services.trailing.service import TrailingService
 
 log = logging.getLogger(__name__)
@@ -127,15 +134,46 @@ class Container:
     settings_store: SettingsStore
     engine: Engine
     market: MarketData
+    skill: SkillService
     catalog: tuple[BrokerSpec, ...]
 
 
+def skill_replay(
+    instrument: Instrument,
+    candles: list[Candle],
+    start: datetime,
+    *,
+    speed: int,
+    paused: bool,
+    stop_side: Callable[[Candle], StopSide | None],
+) -> CandleReplay:
+    return CandleReplay(
+        instrument,
+        candles,
+        start,
+        ManualClock(start),
+        speed=speed,
+        paused=paused,
+        stop_side=stop_side,
+    )
+
+
+def skill_broker(clock: Clock, quote: Callable[[str], Tick | None], slippage: Decimal) -> Broker:
+    """Each Skill Test session gets a PaperBroker of its own. Its fund lives in skill_runs."""
+    return PaperBroker(clock, quote, Decimal("0"), slippage=slippage)
+
+
 def build(
-    settings: Settings, clock: Clock | None = None, market: MarketData | None = None
+    settings: Settings,
+    clock: Clock | None = None,
+    market: MarketData | None = None,
+    skill_history: IndexData | None = None,
 ) -> Container:
     """Wire everything. Nothing here touches the network or the database."""
     calendar = MarketCalendar(day for day, _ in seeds.HOLIDAYS)
     real = SystemClock()
+    # Skill Test's runs are stamped in real time; each replay keeps its own clock.
+    skill_clock: Clock = clock if clock is not None else real
     if clock is None:
         simulated = settings.market_source == "sim"
         start = sim_start(calendar, real.now(), settings.sim_date)
@@ -293,6 +331,25 @@ def build(
     )
     engine_holder.append(engine)
 
+    async def live_locked(user_id: str) -> bool:
+        """For Skill Test's S5 rule: is any of this user's live days locked? Memory only."""
+        async with db() as session:
+            ids = await session.scalars(
+                select(BrokerAccount.id).where(BrokerAccount.user_id == user_id)
+            )
+            return any(guard.locked(account_id, Mode.LIVE) for account_id in ids)
+
+    skill_service = SkillService(
+        store=SkillStore(db),
+        clock=skill_clock,
+        bus=bus,
+        history=skill_history or IndexHistory(settings.data_dir),
+        replays=skill_replay,
+        brokers=skill_broker,
+        live_locked=live_locked,
+        settings=SkillSettings(when_live_locked=settings.skill_when_live_locked, rates=rates),
+    )
+
     async def flush_recorder() -> None:
         if recorder is not None:
             recorder.flush_to_parquet(calendar.trading_date(clock_ref.now()))
@@ -337,6 +394,7 @@ def build(
         settings_store=SettingsStore(db),
         engine=engine,
         market=market or default_market(settings, clock),
+        skill=skill_service,
         catalog=CATALOG,
     )
 
@@ -391,7 +449,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await seed_calendar(container)
         await container.engine.start(container.market)
+        await container.skill.start()
         yield
+        await container.skill.stop()
         await container.engine.stop()
 
     app = FastAPI(title="CoolCandle.ai", lifespan=lifespan)
@@ -414,6 +474,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         signals.router,
         settings_routes.router,
         agent_routes.router,
+        skill.router,
     ):
         app.include_router(router, prefix="/api")
     app.include_router(agent_routes.internal)

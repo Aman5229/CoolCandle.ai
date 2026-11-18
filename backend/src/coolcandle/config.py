@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     agent_url: str | None = None
     agent_token: SecretStr | None = None  # shared: the agent service refuses chats without it
 
+    # Skill Test (docs/skill-test.md): past index days replayed, never live trading.
+    skill_when_live_locked: bool = False  # S5: Skill Test closes while the live day is locked
+
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
     news_rss_urls: list[str] = []

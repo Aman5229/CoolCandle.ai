@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from coolcandle.domain.costs import CostRates, round_trip
+from coolcandle.domain.exits import floor_tick, stop_limit_price
 from coolcandle.domain.models import DaySnapshot, Frozen
 from coolcandle.domain.plan import DailyPlan
 
@@ -22,6 +23,42 @@ def worst_case_loss(
         + round_trip(entry, stop_limit, qty, rates)
         + slippage_points * qty
     )
+
+
+def stop_range(
+    entry: Decimal,
+    qty: int,
+    tick: Decimal,
+    budget: Decimal,
+    rates: CostRates,
+    *,
+    stop_limit_pct: Decimal,
+    min_stop_pct: Decimal,
+    slippage_points: Decimal,
+) -> tuple[Decimal, Decimal] | None:
+    """(lowest, highest) stop trigger the guard allows for `qty` bought at `entry`, worked out
+    exactly as the guard checks it. The highest keeps the stop `min_stop_pct` below the entry;
+    the lowest is the furthest a stop can go before its worst case (the fall to the stop
+    order's limit, the slippage buffer and the charges) costs more than `budget`. None when even
+    the tightest stop costs too much."""
+    highest = floor_tick(entry * (100 - min_stop_pct) / 100, tick)
+    if qty < 1 or highest < tick:
+        return None
+
+    def worst(trigger: Decimal) -> Decimal:
+        limit = stop_limit_price(trigger, tick, stop_limit_pct)
+        return worst_case_loss(entry, limit, qty, slippage_points, rates)
+
+    if worst(highest) > budget:
+        return None
+    low, high = 1, int(highest / tick)  # in ticks; the worst case falls as the stop rises
+    while low < high:
+        middle = (low + high) // 2
+        if worst(tick * middle) <= budget:
+            high = middle
+        else:
+            low = middle + 1
+    return tick * low, highest
 
 
 def _lots_within(

@@ -6,6 +6,9 @@ from pathlib import Path
 SRC = Path(__file__).parent.parent / "src" / "coolcandle"
 ORDER_METHODS = {"place_order", "modify_order", "cancel_order"}
 THE_ONE_DOOR = SRC / "services" / "orders" / "service.py"
+# Skill Test's door: it only ever holds the PaperBroker built for its own session, and
+# import-linter keeps it away from live trading's brokers and services.
+SKILL_DOOR = SRC / "services" / "skill" / "arena.py"
 
 
 def python_files() -> list[Path]:
@@ -26,7 +29,7 @@ def calls_to(path: Path, names: set[str]) -> list[int]:
 def test_only_order_service_calls_the_broker_order_methods() -> None:
     offenders = []
     for path in python_files():
-        if path == THE_ONE_DOOR or "adapters" in path.parts:
+        if path in (THE_ONE_DOOR, SKILL_DOOR) or "adapters" in path.parts:
             continue
         if calls_to(path, ORDER_METHODS):
             offenders.append(str(path))
@@ -35,6 +38,14 @@ def test_only_order_service_calls_the_broker_order_methods() -> None:
 
 def test_the_one_door_does_call_them() -> None:
     assert calls_to(THE_ONE_DOOR, ORDER_METHODS)
+
+
+def test_skill_test_builds_its_broker_only_from_its_own_factory() -> None:
+    """The skill door never names a broker class or the router: it gets one PaperBroker per
+    session from the factory main.py hands it."""
+    text = SKILL_DOOR.read_text()
+    for name in ("BrokerRouter", "KotakBroker", "PaperBroker(", "brokers.get("):
+        assert name not in text, name
 
 
 def test_the_domain_never_touches_the_clock() -> None:

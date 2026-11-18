@@ -88,9 +88,9 @@ async def _prepare(settings: Settings, day: date, setup: SignalSource) -> tuple[
     await engine.feed.use(market)
     engine._indices = {i.key: i.underlying for i in container.instruments.indices()}
     await engine.refresh_accounts()
-    await container.plans.save_draft(account_id, dict(TEST_PLAN))
-    await container.plans.confirm(account_id, 1, None)
-    await container.plans.confirm(account_id, 2, "LOCK")
+    await container.plans.save_draft(account_id, Mode.PAPER, dict(TEST_PLAN))
+    await container.plans.confirm(account_id, Mode.PAPER, 1, None)
+    await container.plans.confirm(account_id, Mode.PAPER, 2, "LOCK")
     return container, account_id
 
 

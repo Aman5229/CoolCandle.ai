@@ -168,7 +168,7 @@ class GuardService:
         *,
         current_stop: Decimal | None = None,
     ) -> Decision:
-        plan = await self.plans.get(account_id)
+        plan = await self.plans.get(account_id, mode)
         snapshot = await self.snapshot(account_id, mode)
         day = self.calendar.trading_date(snapshot.now)
         tick = self.quotes.get(request.instrument_key)
@@ -189,8 +189,12 @@ class GuardService:
         )
         return evaluate(plan, snapshot, request, context, self.config)
 
+    def locked(self, account_id: str, mode: Mode) -> bool:
+        """Is today locked? From memory only: no broker or database call."""
+        return (account_id, mode, self.today()) in self._locks
+
     async def view(self, account_id: str, mode: Mode) -> DayView:
-        plan = await self.plans.get(account_id)
+        plan = await self.plans.get(account_id, mode)
         snapshot = await self.snapshot(account_id, mode)
         day = self.calendar.trading_date(snapshot.now)
         lock = self._locks.get((account_id, mode, day))

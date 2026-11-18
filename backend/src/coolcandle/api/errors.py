@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from coolcandle.domain.exits import ExitPlanError
 from coolcandle.domain.plan import PlanError
@@ -10,6 +11,7 @@ from coolcandle.services.accounts.service import AccountError
 from coolcandle.services.auth.service import AuthError
 from coolcandle.services.orders.routing import BrokerUnavailable
 from coolcandle.services.orders.service import OrderBlocked, TradeError
+from coolcandle.services.skill.service import SkillBlocked, SkillError
 
 
 class ApiError(Exception):
@@ -58,6 +60,16 @@ def add_handlers(app: FastAPI) -> None:
     async def trade_error(_: Request, exc: TradeError) -> JSONResponse:
         return _body(409, exc.code, exc.message)
 
+    @app.exception_handler(SkillError)
+    async def skill_error(_: Request, exc: SkillError) -> JSONResponse:
+        return _body(exc.status, exc.code, exc.message)
+
+    @app.exception_handler(SkillBlocked)
+    async def skill_blocked(_: Request, exc: SkillBlocked) -> JSONResponse:
+        reasons = [r.model_dump() for r in exc.decision.reasons]
+        first = exc.decision.reasons[0].message if exc.decision.reasons else "Refused"
+        return _body(409, "SKILL_BLOCKED", first, reasons=reasons)
+
     @app.exception_handler(RequestValidationError)
     async def invalid(_: Request, exc: RequestValidationError) -> JSONResponse:
         # The errors echo the input, which may be a password, so keep only the field and the reason.
@@ -67,4 +79,9 @@ def add_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ValueError)
     async def bad_value(_: Request, exc: ValueError) -> JSONResponse:
-        return _body(422, "INVALID", str(exc))
+        message = str(exc)
+        if isinstance(exc, ValidationError) and exc.errors():
+            # Only the reason: the full text echoes every value it was given.
+            reason = str(exc.errors()[0].get("msg", "invalid")).removeprefix("Value error, ")
+            message = reason[:1].upper() + reason[1:]
+        return _body(422, "INVALID", message)

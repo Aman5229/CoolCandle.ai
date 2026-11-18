@@ -1,5 +1,6 @@
 """The only place that knows Kotak's field names. Every value arrives as text or float."""
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -42,6 +43,23 @@ def to_int(value: Any) -> int:
 def brief(value: Any) -> str:
     text = str(value)
     return text if len(text) <= 300 else text[:300] + "…"
+
+
+_SHORT_OF_MARGIN = re.compile(
+    r"Margin Exceeds.*?Cash Available:\s*(-?[\d.]+).*?Additional margin required:\s*([\d.]+)",
+    re.IGNORECASE,
+)
+
+
+def plain_reason(text: str) -> str:
+    """Kotak's risk system writes a shortfall for its own staff (seen 16 Nov 2026:
+    "RMS:Margin Exceeds,Cash Available:5978.55,Additional margin required:823.32 for entity
+    ..."). Say it plainly, with its numbers. Anything else passes through as Kotak wrote it."""
+    short = _SHORT_OF_MARGIN.search(text)
+    if short is None:
+        return text
+    cash, more = (Decimal(number) for number in short.groups())
+    return f"Not enough funds in Kotak: ₹{cash:,.2f} available, ₹{more:,.2f} more needed"
 
 
 def check(response: Any, what: str) -> dict[str, Any]:
@@ -99,7 +117,11 @@ def order_from_kotak(row: dict[str, Any], now: datetime) -> Order:
         status=FINAL.get(status_text, OrderStatus.OPEN),
         filled_qty=filled,
         avg_price=avg if filled and avg else None,
-        reject_reason=str(row.get("rejRsn") or "rejected") if status_text == "rejected" else None,
+        reject_reason=(
+            plain_reason(str(row.get("rejRsn") or "rejected"))
+            if status_text == "rejected"
+            else None
+        ),
         updated_at=now,
     )
 

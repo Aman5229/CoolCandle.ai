@@ -1,8 +1,10 @@
-"""The one WebSocket: server pushes day status, orders, trades, alerts, and subscribed ticks."""
+"""The one WebSocket: server pushes day status, orders, trades, alerts, subscribed ticks, and
+Skill Test's own skill.* events, each only to the user it belongs to."""
 
 import asyncio
 import contextlib
 import time
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -10,6 +12,11 @@ from coolcandle.api.deps import SESSION_COOKIE
 
 router = APIRouter()
 TICK_GAP_S = 0.25  # at most four price updates a second per instrument
+
+
+def skill_event_for(data: dict[str, Any], user_id: str) -> bool:
+    """Skill Test's own topics belong to one user's session: only that user is sent them."""
+    return bool(data.get("user_id") == user_id)
 
 
 @router.websocket("/ws")
@@ -46,6 +53,16 @@ async def stream(socket: WebSocket) -> None:
                 last_sent[key] = now
             elif kind == "day_status" and event["data"]["mode"] != user.mode:
                 continue
+            elif kind.startswith("skill."):
+                data = event["data"]
+                if not skill_event_for(data, user.id):
+                    continue
+                if kind == "skill.tick":
+                    slot = data["session_id"]
+                    now = time.monotonic()
+                    if now - last_sent.get(slot, 0.0) < TICK_GAP_S:
+                        continue
+                    last_sent[slot] = now
             await socket.send_json(event)
     except (WebSocketDisconnect, RuntimeError):
         pass

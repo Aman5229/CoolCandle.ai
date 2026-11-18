@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 
 from coolcandle.db.tables import Base
 from coolcandle.main import create_app
-from tests.conftest import make_settings
+from tests.conftest import FakeIndexData, make_settings
 
 EMAIL = "aman@example.com"
 PASSWORD = "a-long-test-password"
@@ -70,6 +70,8 @@ def api(tmp_path: Path) -> Iterator[Api]:
         sim_speed=10.0,
     )
     app = create_app(settings)
+    # Skill Test's history comes from memory in a test, never from Kotak.
+    app.state.container.skill.history = FakeIndexData()
     with TestClient(app) as client:
         container = app.state.container
         secret = client.portal.call(container.auth.create_admin, EMAIL, PASSWORD)  # type: ignore[union-attr]

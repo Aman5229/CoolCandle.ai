@@ -9,19 +9,39 @@ from coolcandle.api.schemas import ModifyStopBody, TicketBody
 from coolcandle.domain.exits import ExitPlan, StopRule, plan_exit
 from coolcandle.domain.models import EntryTicket, ExitReason, OrderSource, Trade
 from coolcandle.services.journal.service import DaySummary, TimelineEvent
-from coolcandle.services.orders.service import Preview
+from coolcandle.services.orders.service import Preview, StopRange
 
 router = APIRouter()
 
 
-def _ticket(body: TicketBody) -> EntryTicket:
-    return EntryTicket(**body.model_dump(), source=OrderSource.MANUAL)
+async def _ticket(body: TicketBody, request: Request, user: User) -> EntryTicket:
+    """A ticket with no stop takes the plan's, worked out now from the price being sent."""
+    stop = body.stop_trigger
+    if stop is None:
+        stop = await request.app.state.container.orders.plan_stop(
+            user.account_id, user.mode, body.instrument_key, body.lots, body.limit_price
+        )
+    values = body.model_dump(exclude={"stop_trigger"})
+    return EntryTicket(**values, stop_trigger=stop, source=OrderSource.MANUAL)
 
 
 @router.post("/orders/preview", dependencies=Protected)
 async def preview(body: TicketBody, request: Request, user: User) -> Preview:
     result: Preview = await request.app.state.container.orders.preview(
-        user.account_id, user.mode, _ticket(body)
+        user.account_id, user.mode, await _ticket(body, request, user)
+    )
+    return result
+
+
+@router.get("/orders/stop-range")
+async def stop_range(
+    request: Request, user: User, key: str, entry: Decimal, lots: int = 1
+) -> StopRange | None:
+    """The stops today's plan allows for this many lots at this entry."""
+    if entry <= 0 or lots < 1:
+        raise ApiError(422, "BAD_TICKET", "The entry and the lots must be above zero")
+    result: StopRange | None = await request.app.state.container.orders.stop_range(
+        user.account_id, user.mode, key, lots, entry
     )
     return result
 
@@ -54,7 +74,7 @@ async def exit_plan(
 @router.post("/trades", dependencies=Protected)
 async def submit(body: TicketBody, request: Request, user: User) -> Trade:
     trade: Trade = await request.app.state.container.orders.submit_entry(
-        user.account_id, user.mode, _ticket(body)
+        user.account_id, user.mode, await _ticket(body, request, user)
     )
     return trade
 

@@ -1,4 +1,8 @@
-"""PaperBroker: fills against live quotes, with the same rules a real exchange applies."""
+"""PaperBroker: fills against live quotes, with the same rules a real exchange applies.
+
+Live paper trading only sends LIMIT orders and SL (stop-limit) sells. Skill Test also sends
+MARKET orders and SL-M stops, which fill at the bid or ask plus a slippage that is zero unless the
+caller sets one. Stops work on either side: a sell stop below the price, a buy stop above it."""
 
 from collections.abc import Callable
 from decimal import Decimal
@@ -25,15 +29,41 @@ from coolcandle.ports.broker import (
 from coolcandle.ports.clock import Clock
 
 PAPER_SPEC = BrokerSpec(id="paper", name="Paper", status=BrokerStatus.LIVE)
+_STOPS = frozenset({OrderType.SL, OrderType.SL_M})
+_AT_MARKET = frozenset({OrderType.MARKET, OrderType.SL_M})  # SL-M fills at market once triggered
+
+
+def _stop_reached(req: OrderRequest, tick: Tick) -> bool:
+    """A sell stop (protecting a long) fires at or below its trigger, a buy stop at or above."""
+    if req.trigger is None:
+        return False
+    return tick.ltp <= req.trigger if req.side is Side.SELL else tick.ltp >= req.trigger
+
+
+def _wrong_side_stop(req: OrderRequest, tick: Tick) -> str | None:
+    """A stop already through the price would fire at once, so the exchange refuses it."""
+    if req.side is Side.SELL and (req.trigger is None or req.trigger >= tick.ltp):
+        return "Trigger is above the last traded price"
+    if req.side is Side.BUY and (req.trigger is None or req.trigger <= tick.ltp):
+        return "Trigger is below the last traded price"
+    return None
 
 
 class PaperBroker:
     spec = PAPER_SPEC
 
-    def __init__(self, clock: Clock, quote: Callable[[str], Tick | None], cash: Decimal) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        quote: Callable[[str], Tick | None],
+        cash: Decimal,
+        *,
+        slippage: Decimal = ZERO,
+    ) -> None:
         self.clock = clock
         self.quote = quote
         self.cash = cash
+        self.slippage = slippage  # added to market buys, taken off market sells
         self._orders: dict[str, Order] = {}
         self._values: dict[str, Decimal] = {}  # filled quantity x price, per order
         self._triggered: set[str] = set()
@@ -66,15 +96,16 @@ class PaperBroker:
         return None
 
     async def place_order(self, req: OrderRequest) -> Order:
-        if req.price is None:
+        if req.price is None and req.order_type not in _AT_MARKET:
             raise BrokerError("Paper orders need a price")
         broker_id = f"P{self._next_id}"
         self._next_id += 1
         tick = self.quote(req.instrument_key)
         status, reason = OrderStatus.OPEN, None
-        if req.order_type is OrderType.SL and tick is not None:
-            if req.trigger is None or req.trigger >= tick.ltp:
-                status, reason = OrderStatus.REJECTED, "Trigger is above the last traded price"
+        if req.order_type in _STOPS and tick is not None:
+            reason = _wrong_side_stop(req, tick)
+            if reason is not None:
+                status = OrderStatus.REJECTED
         order = self._store(
             Order(
                 id=broker_id,
@@ -138,16 +169,20 @@ class PaperBroker:
     def _match(self, broker_id: str, tick: Tick) -> None:
         order = self._orders[broker_id]
         req = order.request
-        if order.status is not OrderStatus.OPEN or req.price is None:
+        if order.status is not OrderStatus.OPEN:
             return
-        if req.order_type is OrderType.SL and broker_id not in self._triggered:
-            if req.trigger is None or tick.ltp > req.trigger:
+        if req.order_type in _STOPS and broker_id not in self._triggered:
+            if not _stop_reached(req, tick):
                 return
             self._triggered.add(broker_id)
 
         bid = tick.bid if tick.bid is not None else tick.ltp
         ask = tick.ask if tick.ask is not None else tick.ltp
-        if req.side is Side.BUY:
+        if req.order_type in _AT_MARKET:
+            price = ask + self.slippage if req.side is Side.BUY else bid - self.slippage
+        elif req.price is None:
+            return
+        elif req.side is Side.BUY:
             if ask > req.price:
                 return
             price = ask

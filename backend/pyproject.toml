@@ -106,6 +106,36 @@ source_modules = ["coolcandle.adapters"]
 forbidden_modules = ["coolcandle.services", "coolcandle.api", "coolcandle.db", "coolcandle.main"]
 
 [[tool.importlinter.contracts]]
+name = "Skill Test never reaches live trading"
+type = "forbidden"
+source_modules = ["coolcandle.services.skill"]
+forbidden_modules = [
+    "coolcandle.services.orders",
+    "coolcandle.services.guard",
+    "coolcandle.services.reconcile",
+    "coolcandle.services.trailing",
+    "coolcandle.adapters.brokers.kotak_neo",
+]
+
+[[tool.importlinter.contracts]]
+name = "Live trading never imports Skill Test"
+type = "forbidden"
+source_modules = [
+    "coolcandle.services.orders",
+    "coolcandle.services.guard",
+    "coolcandle.services.reconcile",
+    "coolcandle.services.trailing",
+    "coolcandle.services.plans",
+    "coolcandle.services.signals",
+    "coolcandle.services.engine",
+    "coolcandle.services.agent",
+    "coolcandle.services.accounts",
+    "coolcandle.services.market",
+    "coolcandle.adapters.brokers",
+]
+forbidden_modules = ["coolcandle.services.skill", "coolcandle.domain.skill"]
+
+[[tool.importlinter.contracts]]
 name = "The API goes through services"
 type = "forbidden"
 source_modules = ["coolcandle.api"]

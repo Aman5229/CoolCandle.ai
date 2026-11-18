@@ -144,7 +144,8 @@ def test_a_bad_plan_gives_the_error_shape(api: Api) -> None:
     assert response.json()["code"] == "INVALID"
 
 
-def test_a_locked_plan_only_gets_stricter(api: Api) -> None:
+def test_a_locked_paper_plan_can_be_changed_either_way(api: Api) -> None:
+    """Sessions start in paper. Live's stricter-only rule is tested in test_plan_modes.py."""
     api.login()
     api.lock_plan()
     base = {
@@ -153,12 +154,13 @@ def test_a_locked_plan_only_gets_stricter(api: Api) -> None:
         "max_trades": 3,
         "max_loss_per_trade": "1500",
     }
-    looser = api.put("/api/plan/today", base | {"loss_limit": "4000"})
-    assert looser.status_code == 409
-    assert looser.json()["code"] == "PLAN_LOCKED"
+    looser = api.put("/api/plan/today", base | {"loss_limit": "4000", "max_trades": 5})
+    assert looser.status_code == 200
+    assert looser.json()["status"] == "LOCKED"
+    assert Decimal(looser.json()["loss_limit"]) == Decimal("4000")
+    assert looser.json()["max_trades"] == 5
     stricter = api.put("/api/plan/today", base | {"loss_limit": "2000"})
     assert stricter.status_code == 200
-    assert stricter.json()["status"] == "LOCKED"
     assert Decimal(stricter.json()["loss_limit"]) == 2000
 
 
@@ -286,6 +288,63 @@ def test_a_paper_trade_end_to_end_on_the_simulator(api: Api) -> None:
     timeline = api.client.get(f"/api/trades/{trade_id}").json()
     assert timeline[-1]["type"] == "EXIT_FILLED"
     assert api.client.get("/api/day/status").json()["snapshot"]["trades_taken"] == 1
+
+
+def test_the_ticket_learns_the_allowed_stops_before_a_stop_is_typed(api: Api) -> None:
+    api.login()
+    call = atm_call(api)
+    query = {"key": call["key"], "entry": call["ask"], "lots": 1}
+    assert api.client.get("/api/orders/stop-range", params=query).json() is None  # no plan yet
+
+    api.lock_plan()
+    found = api.client.get("/api/orders/stop-range", params=query).json()
+    assert Decimal(found["budget"]) == Decimal("1500")
+    lowest, highest = Decimal(found["lowest"]), Decimal(found["highest"])
+    assert lowest <= highest < Decimal(call["ask"])
+
+    for stop in (lowest, highest):
+        preview = api.post("/api/orders/preview", ticket(call, stop_trigger=str(stop))).json()
+        assert preview["decision"]["action"] in ("ALLOW", "WARN"), preview
+        parts = (Decimal(preview[name]) for name in ("to_stop_limit", "slippage", "charges"))
+        assert sum(parts) == Decimal(preview["worst_case"])
+    too_far = api.post(
+        "/api/orders/preview", ticket(call, stop_trigger=str(lowest - Decimal("0.05")))
+    ).json()
+    assert "MAX_LOSS" in {reason["code"] for reason in too_far["decision"]["reasons"]}
+
+    bad = api.client.get("/api/orders/stop-range", params=query | {"lots": 0})
+    assert bad.status_code == 422
+
+
+def test_a_ticket_without_a_stop_takes_the_plans_stop(api: Api) -> None:
+    api.login()
+    api.lock_plan()
+    call = atm_call(api)
+    body = ticket(call)
+    del body["stop_trigger"]
+    query = {"key": call["key"], "entry": body["limit_price"], "lots": 1}
+    lowest = api.client.get("/api/orders/stop-range", params=query).json()["lowest"]
+
+    preview = api.post("/api/orders/preview", body).json()
+    assert preview["decision"]["action"] in ("ALLOW", "WARN"), preview
+    assert preview["stop"] == lowest
+    assert Decimal(preview["worst_case"]) <= Decimal("1500")
+
+    placed = api.post("/api/trades", body)
+    assert placed.status_code == 200, placed.text
+    assert placed.json()["stop_trigger"] == lowest
+
+
+def test_a_ticket_without_a_stop_is_refused_when_none_fits(api: Api) -> None:
+    api.login()
+    api.lock_plan(max_loss_per_trade="100")  # less than the slippage buffer on one lot
+    body = ticket(atm_call(api))
+    del body["stop_trigger"]
+    refused = api.post("/api/trades", body)
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "NO_STOP_FITS"
+    assert "pick a cheaper strike" in refused.json()["message"]
+    assert api.client.get("/api/trades").json() == []
 
 
 def test_a_blocked_order_says_why(api: Api) -> None:
@@ -447,3 +506,21 @@ def test_kotak_mode_starts_with_no_prices_at_all(tmp_path: Any) -> None:
     market = default_market(settings, None)  # type: ignore[arg-type]
     assert not market.is_real
     assert type(market).__name__ == "IdleMarket"
+
+
+def test_a_plan_that_does_not_fit_says_why_in_one_plain_sentence(api: Api) -> None:
+    api.login()
+    body = {
+        "profit_target": "650",
+        "loss_limit": "400",
+        "max_trades": 2,
+        "max_loss_per_trade": "1500",
+    }
+    refused = api.put("/api/plan/today", body)
+    assert refused.status_code == 422
+    assert refused.json() == {
+        "code": "INVALID",
+        "message": "Max loss per trade cannot be above the day's loss limit",
+    }
+    late = api.put("/api/plan/today", body | {"max_loss_per_trade": "300", "entry_cutoff": "15:30"})
+    assert late.json()["message"].startswith("Times must run in order")

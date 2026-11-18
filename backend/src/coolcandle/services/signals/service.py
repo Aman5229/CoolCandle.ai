@@ -126,8 +126,9 @@ class SignalService:
         self._fired.add(once)
 
         # No alerts that tempt a locked or unplanned day, or the minutes around big news.
-        plan = await self.plans.get(account_id)
-        if plan is None or plan.status is not PlanStatus.LOCKED:
+        # Taking one still runs the guard against the plan of the trader's own mode.
+        plans = [await self.plans.get(account_id, mode) for mode in Mode]
+        if not any(plan is not None and plan.status is PlanStatus.LOCKED for plan in plans):
             return
         if any(self.guard.lock_reason(account_id, mode) for mode in Mode):
             return

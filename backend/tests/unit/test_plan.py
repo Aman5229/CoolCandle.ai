@@ -12,6 +12,7 @@ from coolcandle.domain.plan import (
     PlanStatus,
     cancel_confirmation,
     confirm,
+    plan_changes,
     stricter_changes,
 )
 
@@ -135,3 +136,22 @@ def test_no_accepted_edit_ever_loosens_a_field(loss: Decimal, trades: int) -> No
         return
     assert new.loss_limit <= base.loss_limit
     assert new.max_trades <= base.max_trades
+
+
+def test_a_paper_edit_lists_every_change_looser_or_stricter() -> None:
+    base = plan()
+    changed = edit(base, loss_limit=Decimal("4000"), max_trades=2, allowed_underlyings=("NIFTY",))
+    assert {field for field, _, _ in plan_changes(base, changed)} == {
+        "loss_limit",
+        "max_trades",
+        "allowed_underlyings",
+    }
+    assert plan_changes(base, base) == []
+
+
+def test_the_live_rule_still_refuses_what_paper_allows() -> None:
+    base = plan()
+    looser = edit(base, loss_limit=Decimal("4000"))
+    assert plan_changes(base, looser) == [("loss_limit", "3000", "4000")]
+    with pytest.raises(PlanError):
+        stricter_changes(base, looser)

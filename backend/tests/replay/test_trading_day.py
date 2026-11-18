@@ -146,7 +146,7 @@ async def test_the_stop_closes_the_trade(harness: Harness) -> None:
 async def test_the_target_exit_modifies_the_stop_and_never_cancels_it(harness: Harness) -> None:
     await harness.lock_plan()
     trade = await harness.enter(target=Decimal("120"))
-    await harness.tick(CALL, "120", "119.95", "120.05")
+    await harness.tick(CALL, "120.05", "120", "120.10")
     await harness.app.engine.pump()
 
     closed = (await harness.trades())[0]
@@ -158,6 +158,23 @@ async def test_the_target_exit_modifies_the_stop_and_never_cancels_it(harness: H
     assert sells[0].status is OrderStatus.COMPLETE
     assert not any(o.status is OrderStatus.CANCELLED for o in orders)
     assert trade.stop_order_id == closed.stop_order_id
+
+
+async def test_the_target_waits_for_the_bid_so_the_exit_is_at_the_target_or_above(
+    harness: Harness,
+) -> None:
+    await harness.lock_plan()
+    await harness.enter(target=Decimal("120"))
+    await harness.tick(CALL, "120", "119.90", "120.05")  # a trade at 120, but buyers lower
+    await harness.app.engine.pump()
+    assert (await harness.trades())[0].state is TradeState.OPEN
+
+    await harness.tick(CALL, "120.10", "120.05", "120.15")
+    await harness.app.engine.pump()
+    closed = (await harness.trades())[0]
+    assert closed.state is TradeState.CLOSED
+    assert closed.exit_reason is ExitReason.TARGET
+    assert closed.exit_avg is not None and closed.exit_avg >= Decimal("120")
 
 
 async def test_a_manual_exit(harness: Harness) -> None:
@@ -329,7 +346,7 @@ async def test_a_restart_keeps_the_plan_and_the_lock(on_disk: tuple[Harness, str
     await harness.settle()
 
     after = await reopen(harness, url)
-    assert (await after.app.plans.get(after.account_id)) is not None
+    assert (await after.app.plans.get(after.account_id, after.mode)) is not None
     assert after.app.guard.lock_reason(after.account_id, Mode.PAPER) is LockReason.MAX_TRADES
     await after.tick(NIFTY, "24500")
     await after.tick(CALL, "100", "99.95", "100")
@@ -617,7 +634,11 @@ async def test_a_refused_entry_is_rejected_and_never_retried(harness: Harness) -
     await harness.tick(NIFTY, "24500")
     await harness.tick(CALL, "100", "99.95", "100")
     flaky = FlakyPlace(paper(harness), BrokerError("Insufficient funds"), placed_anyway=False)
-    trade = await harness.app.orders.submit_entry(harness.account_id, Mode.PAPER, harness.ticket())
+    with pytest.raises(TradeError) as refused:
+        await harness.app.orders.submit_entry(harness.account_id, Mode.PAPER, harness.ticket())
+    assert refused.value.code == "BROKER_REJECTED"
+    assert "Insufficient funds" in refused.value.message
+    [trade] = await harness.trades()
     assert trade.state is TradeState.REJECTED
     assert flaky.calls == 1
 

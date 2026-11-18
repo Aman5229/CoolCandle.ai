@@ -12,14 +12,14 @@ LIVE_WORD = "LIVE"
 
 @router.get("/plan/today")
 async def get_plan(request: Request, user: User) -> DailyPlan | None:
-    plan: DailyPlan | None = await request.app.state.container.plans.get(user.account_id)
+    plan: DailyPlan | None = await request.app.state.container.plans.get(user.account_id, user.mode)
     return plan
 
 
 @router.put("/plan/today", dependencies=Protected)
 async def put_plan(body: PlanBody, request: Request, user: User) -> DailyPlan:
     plan: DailyPlan = await request.app.state.container.plans.save_draft(
-        user.account_id, body.model_dump()
+        user.account_id, user.mode, body.model_dump()
     )
     return plan
 
@@ -27,14 +27,14 @@ async def put_plan(body: PlanBody, request: Request, user: User) -> DailyPlan:
 @router.post("/plan/today/confirm", dependencies=Protected)
 async def confirm(body: ConfirmBody, request: Request, user: User) -> DailyPlan:
     plan: DailyPlan = await request.app.state.container.plans.confirm(
-        user.account_id, body.step, body.typed
+        user.account_id, user.mode, body.step, body.typed
     )
     return plan
 
 
 @router.post("/plan/today/cancel", dependencies=Protected)
 async def cancel(request: Request, user: User) -> DailyPlan:
-    plan: DailyPlan = await request.app.state.container.plans.cancel(user.account_id)
+    plan: DailyPlan = await request.app.state.container.plans.cancel(user.account_id, user.mode)
     return plan
 
 
