@@ -846,6 +846,9 @@ table.trades tbody tr { cursor: pointer; }
 }
 
 .toast .tag { margin-left: 0; }
+.toast.error { flex-wrap: wrap; max-width: min(460px, calc(100vw - 40px)); border-color: var(--down); }
+.toast.error b { color: var(--down); }
+.toast.error .reason { flex-basis: 100%; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(16px); }

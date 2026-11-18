@@ -8,7 +8,7 @@ const SCREENS = [
   { name: 'tablet landscape', width: 1024, height: 768 },
   { name: 'laptop', width: 1440, height: 900 },
 ]
-const PAGES = ['Trading', "Today's plan", 'Buddy', 'Journal', 'Brokers', 'Settings']
+const PAGES = ['Trading', "Today's plan", 'Buddy', 'Journal', 'Skill Test', 'Brokers', 'Settings']
 
 /** Everything visible that pokes out past either edge of the screen. */
 async function spills(page: Page): Promise<string[]> {

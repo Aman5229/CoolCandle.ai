@@ -10,7 +10,7 @@ import { OptionChain } from './OptionChain'
 import { OrderTicket } from './OrderTicket'
 import { type Interval } from './bars'
 import { PriceChart } from './PriceChart'
-import { TradeToast } from './TradeToast'
+import { RejectionToast, TradeToast } from './TradeToast'
 
 const INDICES = { NIFTY: 'nse_cm|Nifty 50', SENSEX: 'bse_cm|SENSEX' } as const
 type Underlying = keyof typeof INDICES
@@ -91,6 +91,7 @@ export function TradingPage({ day, onOpenPlan }: { day: Day; onOpenPlan: () => v
         </section>
       </div>
       <TradeToast trades={trades.data} />
+      <RejectionToast trades={trades.data} />
     </div>
   )
 }

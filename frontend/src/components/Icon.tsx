@@ -11,6 +11,9 @@ const PATHS = {
   logout: 'M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3',
   chevron: 'M15 18l-6-6 6-6',
   menu: 'M3 6h18M3 12h18M3 18h18',
+  target: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 18a6 6 0 100-12 6 6 0 000 12zM12 14a2 2 0 100-4 2 2 0 000 4z',
+  play: 'M7 4l13 8-13 8V4z',
+  pause: 'M8 4v16M16 4v16',
 } as const
 
 export type IconName = keyof typeof PATHS

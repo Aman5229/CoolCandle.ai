@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type Day, type DayStatus, type Snapshot, type Signal, type Trade } from './api'
 import { live, type Tick } from './ws'
 
@@ -78,6 +78,24 @@ export function useTickDirection(value: string | null | undefined): 'up' | 'down
 /** True when the user has asked their device for less motion. */
 export function prefersCalm(): boolean {
   return matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** `value`, changing at most once every `ms` and always ending on the latest: for requests that
+ * would otherwise go out on every tick. */
+export function useThrottled<T>(value: T, ms: number): T {
+  const [shown, setShown] = useState(value)
+  const last = useRef(0)
+  useEffect(() => {
+    const timer = setTimeout(
+      () => {
+        last.current = Date.now()
+        setShown(value)
+      },
+      Math.max(last.current + ms - Date.now(), 0),
+    )
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return shown
 }
 
 export function useNow(ms: number): number {

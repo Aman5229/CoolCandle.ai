@@ -1,5 +1,5 @@
 import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader, Logo } from '../components/Brand'
 import { Header } from '../components/Header'
 import { Icon, type IconName } from '../components/Icon'
@@ -10,19 +10,21 @@ import { JournalPage } from '../features/journal/JournalPage'
 import { ConfirmPage, parseConfirmLink } from '../features/signals/ConfirmPage'
 import { PlanPage } from '../features/plan/PlanPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
+import { SkillPage, SkillTopbar } from '../features/skill/SkillPage'
 import { TradingPage } from '../features/trading/TradingPage'
 import { api, ApiError } from '../lib/api'
 import { useDay, useTheme } from '../lib/hooks'
 import { live } from '../lib/ws'
 import { usePageSwitch } from './pageSwitch'
+import { navigate, viewFromHash, type View } from './route'
 
-type View = 'trading' | 'plan' | 'buddy' | 'journal' | 'brokers' | 'settings'
 
 const PAGES: { view: View; label: string; icon: IconName }[] = [
   { view: 'trading', label: 'Trading', icon: 'trade' },
   { view: 'plan', label: "Today's plan", icon: 'plan' },
   { view: 'buddy', label: 'Buddy', icon: 'chat' },
   { view: 'journal', label: 'Journal', icon: 'book' },
+  { view: 'skill', label: 'Skill Test', icon: 'target' },
   { view: 'brokers', label: 'Brokers', icon: 'link' },
   { view: 'settings', label: 'Settings', icon: 'gear' },
 ]
@@ -51,8 +53,9 @@ function Workspace() {
   // Requests for data a page has never had. Background refreshes of data on screen don't count.
   const firstLoads = useIsFetching({ predicate: (query) => query.state.data === undefined })
   // With a trade open, Trading opens at once: nothing may stand between the trader and Exit.
+  const [hash, setHash] = useState(location.hash)
   const { view, switching, go } = usePageSwitch<View>(
-    'trading',
+    viewFromHash(location.hash), // a refresh stays on the page it was on
     (next) => next === 'trading' && !!day.data?.snapshot.open_trade,
     firstLoads > 0,
   )
@@ -71,9 +74,22 @@ function Workspace() {
     return () => window.removeEventListener('keydown', close)
   }, [menuOpen])
 
+  // The address drives the page, so back, forward and refresh all land where they should.
+  const goTo = useRef(go)
+  goTo.current = go
+  useEffect(() => {
+    const follow = () => {
+      setHash(location.hash)
+      goTo.current(viewFromHash(location.hash))
+    }
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [])
+
   const open = (next: View) => {
     setMenuOpen(false)
-    go(next)
+    navigate(`#/${next}`)
+    go(next) // at once: the address change only arrives a moment later
   }
 
   const logout = useMutation({
@@ -84,7 +100,7 @@ function Workspace() {
     },
   })
 
-  const link = parseConfirmLink(location.hash)
+  const link = parseConfirmLink(hash)
   const state = day.data?.status.state
   const canTrade = state !== undefined && state !== 'LOCKED' && state !== 'NO_PLAN'
 
@@ -122,7 +138,11 @@ function Workspace() {
         </div>
       </aside>
       <div className="main">
-        <Header day={day.data} me={me.data} onMenu={() => setMenuOpen(true)} />
+        {view === 'skill' ? (
+          <SkillTopbar onMenu={() => setMenuOpen(true)} />
+        ) : (
+          <Header day={day.data} me={me.data} onMenu={() => setMenuOpen(true)} />
+        )}
         <main className="content">
           {link && <ConfirmPage link={link} canTrade={canTrade} />}
           {switching && (
@@ -136,11 +156,14 @@ function Workspace() {
               <div className="center stage"><Loader text="Loading your day…" /></div>
             )}
             {day.data && view === 'trading' && (
-              <TradingPage day={day.data} onOpenPlan={() => go('plan')} />
+              <TradingPage day={day.data} onOpenPlan={() => open('plan')} />
             )}
-            {view === 'plan' && <PlanPage onTrade={() => go('trading')} />}
+            {view === 'plan' && (
+              <PlanPage mode={day.data?.mode ?? me.data?.mode ?? 'paper'} onTrade={() => open('trading')} />
+            )}
             {view === 'buddy' && <BuddyPage canTrade={canTrade} />}
             {day.data && view === 'journal' && <JournalPage today={day.data.trading_date} />}
+            {view === 'skill' && <SkillPage />}
             {view === 'brokers' && <BrokersPage />}
             {view === 'settings' && <SettingsPage theme={theme} onTheme={toggleTheme} />}
           </div>

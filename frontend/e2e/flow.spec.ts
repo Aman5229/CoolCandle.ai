@@ -44,7 +44,7 @@ test('sign in, lock a plan, paper trade, hit the lock, see the greyed-out day', 
   await dialog.getByLabel('Type LOCK').fill('LOCK')
   await shot(page, '3-confirm')
   await dialog.getByRole('button', { name: 'Lock the plan' }).click()
-  await expect(page.getByText('You can only make it stricter')).toBeVisible()
+  await expect(page.getByText(/you can still change any limit/)).toBeVisible() // a paper plan stays editable
 
   await page.getByRole('button', { name: 'Trading', exact: true }).click()
   await expect(page.getByTestId('day-state')).toHaveText(/Active|Warning/)

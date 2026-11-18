@@ -1,0 +1,326 @@
+/* Skill Test's own look: an arcade HUD, so practice can never be mistaken for live money. Every
+   colour is a token here, under [data-arena='skill'], in a light and a dark variant. The shared
+   components (buttons, chips, cards) pick the palette up through the same tokens. */
+
+:root[data-arena='skill'] {
+  --bg: #f6f3ff;
+  --surface: #ffffff;
+  --sidebar: #ffffff;
+  --hover: #efe9ff;
+  --text: #1a1033;
+  --muted: #6c5f94;
+  --border: #e0d7fb;
+  --accent: #7c3aed;
+  --accent-soft: #efe7ff;
+  --up: #0f8f5f;
+  --up-soft: #e2f7ee;
+  --down: #d1245a;
+  --down-soft: #fde8ef;
+  --warn: #9a6a00;
+  --warn-soft: #fff4d6;
+  --skill-cyan: #0891b2;
+  --skill-glow: 0 0 14px rgba(124, 58, 237, 0.25);
+  --skill-grid: rgba(124, 58, 237, 0.06);
+  --skill-overlay: rgba(246, 243, 255, 0.82);
+}
+
+:root[data-arena='skill'][data-theme='dark'] {
+  --bg: #07060f;
+  --surface: #0f0c1d;
+  --sidebar: #0b0916;
+  --hover: #1a1530;
+  --text: #efeaff;
+  --muted: #9d93c4;
+  --border: #2a2148;
+  --accent: #b46bff;
+  --accent-soft: rgba(180, 107, 255, 0.16);
+  --up: #39f5a4;
+  --up-soft: rgba(57, 245, 164, 0.12);
+  --down: #ff4d7d;
+  --down-soft: rgba(255, 77, 125, 0.13);
+  --warn: #ffd23f;
+  --warn-soft: rgba(255, 210, 63, 0.12);
+  --skill-cyan: #22e3ff;
+  --skill-glow: 0 0 18px rgba(180, 107, 255, 0.45);
+  --skill-grid: rgba(180, 107, 255, 0.07);
+  --skill-overlay: rgba(7, 6, 15, 0.84);
+}
+
+.skill-page {
+  min-height: calc(100vh - 120px);
+  background-image:
+    linear-gradient(var(--skill-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--skill-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* --- the bar that replaces the live header: a phone's menu button only ------------------- */
+
+.skill-topbar { display: none; }
+
+/* --- HUD ------------------------------------------------------------------------------ */
+
+.hud {
+  position: sticky;
+  top: 12px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--skill-glow);
+}
+
+.hud-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hud-cell > span:first-child {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hud-value {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 19px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.hud .meter { max-width: none; }
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  text-shadow: var(--skill-glow);
+}
+
+.score-badge .delta { font-size: 12px; }
+.score-badge .delta.up { color: var(--up); }
+.score-badge .delta.down { color: var(--down); }
+.score-badge.pulse { animation: score-pulse 0.6s ease-out; }
+
+@keyframes score-pulse {
+  40% { transform: scale(1.18); }
+}
+
+/* --- lobby -------------------------------------------------------------------------- */
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.tile:hover:not(:disabled) { border-color: var(--accent); box-shadow: var(--skill-glow); }
+.tile:disabled { opacity: 0.5; }
+.tile strong { font-size: 16px; }
+
+.big-number {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.score-list { display: flex; flex-direction: column; gap: 6px; }
+
+.score-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.score-row:hover { background: var(--hover); }
+
+.score-pill {
+  display: inline-grid;
+  place-items: center;
+  min-width: 46px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+/* --- arena -------------------------------------------------------------------------- */
+
+.arena-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* The ticket after a lock: still there, plainly off, until a new session starts. */
+.card.greyed { filter: grayscale(1); opacity: 0.5; pointer-events: none; }
+
+.btn.buy { border-color: transparent; background: var(--up); color: var(--bg); }
+
+pre.code {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 9px;
+  background: var(--hover);
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+.replay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-bar .hud-value { font-size: 15px; margin-left: auto; }
+
+/* --- lock and blown screens ------------------------------------------------------------ */
+
+.lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--skill-overlay);
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.3s ease-out;
+}
+
+.lock-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 28px 22px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--skill-glow);
+  text-align: center;
+}
+
+.lock-card h2 { font-size: 24px; }
+.lock-card .row { justify-content: center; }
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 31;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confetti i {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  animation: confetti-fall 2.6s cubic-bezier(0.3, 0.6, 0.6, 1) forwards;
+}
+
+@keyframes confetti-fall {
+  to { transform: translateY(105vh) rotate(720deg); opacity: 0.4; }
+}
+
+/* --- report card ------------------------------------------------------------------------ */
+
+.report-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+
+.report-score {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: var(--skill-glow);
+}
+
+.report-grade {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--accent);
+  border-radius: 14px;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.equity { width: 100%; height: 160px; }
+.equity .curve { fill: none; stroke: var(--accent); stroke-width: 2; }
+.equity .limit { stroke-dasharray: 4 4; stroke-width: 1; }
+.equity .target { stroke: var(--up); }
+.equity .loss { stroke: var(--down); }
+.equity .start { stroke: var(--muted); }
+
+table.breakdown { width: 100%; border-collapse: collapse; }
+table.breakdown td { padding: 7px 6px; border-top: 1px solid var(--border); }
+table.breakdown tr.linked { cursor: pointer; }
+table.breakdown tr.linked:hover, table.breakdown tr.focus { background: var(--hover); }
+table.breakdown td.points { text-align: right; font-weight: 800; }
+
+/* --- motion off, and smaller screens ---------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .score-badge.pulse, .lock-overlay { animation: none; }
+  .confetti { display: none; }
+}
+
+@media (max-width: 999px) {
+  .arena-grid { grid-template-columns: minmax(0, 1fr); }
+  .hud { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hud .meter-cell { grid-column: 1 / -1; grid-row: 1; }
+}
+
+@media (max-width: 767px) {
+  .skill-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  /* On a phone the HUD scrolls with the page: pinned, it would cover a third of the screen. */
+  .hud { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; }
+  .hud-value { font-size: 16px; }
+  .report-score { font-size: 48px; }
+}

@@ -5,7 +5,8 @@ import type { Candle } from '../../lib/api'
 const IST_OFFSET_S = 5.5 * 3600
 const SESSION_OPEN_S = (9 * 60 + 15) * 60
 const DAY_S = 86400
-const MINUTES = { '1m': 1, '5m': 5 } as const
+// A day bar is the whole 375-minute session, so every tick of a day falls in its 09:15 bucket.
+const MINUTES = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '1d': 375 } as const
 
 export type Interval = keyof typeof MINUTES
 export type Bar = CandlestickData<UTCTimestamp>

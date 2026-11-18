@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { ErrorText, Field, Notice } from '../../components/Field'
 import { Padlock } from '../../components/Padlock'
-import { api, type Plan, type PlanInput } from '../../lib/api'
+import { api, type Mode, type Plan, type PlanInput } from '../../lib/api'
 import { inrWhole, shortTime } from '../../lib/format'
 
 const DEFAULTS: PlanInput = {
@@ -44,9 +44,12 @@ function Summary({ form }: { form: PlanInput }) {
   )
 }
 
-export function PlanPage({ onTrade }: { onTrade: () => void }) {
+/** Paper and live keep a plan each. A locked live plan only gets stricter; a locked paper plan
+ * can still be changed either way, because it guards no real money. */
+export function PlanPage({ mode, onTrade }: { mode: Mode; onTrade: () => void }) {
   const client = useQueryClient()
-  const plan = useQuery({ queryKey: ['plan'], queryFn: api.plan })
+  const plan = useQuery({ queryKey: ['plan', mode], queryFn: api.plan })
+  const paper = mode === 'paper'
   const [form, setForm] = useState<PlanInput>(DEFAULTS)
   const [typed, setTyped] = useState('')
   const [justLocked, setJustLocked] = useState(false)
@@ -84,11 +87,16 @@ export function PlanPage({ onTrade }: { onTrade: () => void }) {
 
   return (
     <section className="card">
-      <h2>Today's plan</h2>
+      <div className="card-head">
+        <h2>Today's plan</h2>
+        <span className={`chip ${paper ? 'info' : 'bad'}`}>{paper ? 'PAPER' : 'LIVE'} plan</span>
+      </div>
       {locked ? (
         <Notice>
           <Padlock size={16} closing={justLocked} />{' '}
-          The plan is locked until the next trading day. You can only make it stricter.{' '}
+          {paper
+            ? 'The paper plan is locked for trading, and you can still change any limit. A live plan only gets stricter.'
+            : 'The plan is locked until the next trading day. You can only make it stricter.'}{' '}
           <button type="button" className="link" onClick={onTrade}>Go to trading</button>
         </Notice>
       ) : (
@@ -142,9 +150,12 @@ export function PlanPage({ onTrade }: { onTrade: () => void }) {
       </div>
 
       <ErrorText error={save.error ?? firstConfirm.error} />
+      {locked && save.isSuccess && <p className="muted small">Saved.</p>}
       <div className="row">
         {locked ? (
-          <button type="button" className="btn" onClick={() => save.mutate()}>Make stricter</button>
+          <button type="button" className="btn" onClick={() => save.mutate()}>
+            {paper ? 'Save changes' : 'Make stricter'}
+          </button>
         ) : (
           <>
             <button type="button" className="btn" onClick={() => save.mutate()}>Save draft</button>
@@ -160,7 +171,12 @@ export function PlanPage({ onTrade }: { onTrade: () => void }) {
           <div className="dialog" role="dialog" aria-label="Lock today's plan">
             <h2>Lock this plan?</h2>
             <Summary form={form} />
-            <p>Once locked it can only get stricter until the next trading day. Type <b>LOCK</b>.</p>
+            <p>
+              {paper
+                ? 'This is your paper plan: you can still change it after locking.'
+                : 'Once locked it can only get stricter until the next trading day.'}{' '}
+              Type <b>LOCK</b>.
+            </p>
             <input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type LOCK" />
             <ErrorText error={secondConfirm.error} />
             <div className="row">

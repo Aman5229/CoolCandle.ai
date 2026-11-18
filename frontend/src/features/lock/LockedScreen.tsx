@@ -11,6 +11,13 @@ export function LockedScreen({ day }: { day: Day }) {
   }, [])
   // The brand mark means "target hit, ring closes", so it marks that lock; the others get a padlock.
   const target = day.status.lock_reason === 'TARGET'
+  // The lock keeps the reason it was written with, but trades in the broker's own app can carry
+  // on after it. Say so when they have taken the day past the loss limit.
+  const lossLimit = day.plan?.loss_limit
+  const pastLossLimit =
+    day.status.lock_reason !== 'LOSS_LIMIT' &&
+    lossLimit !== undefined &&
+    Number(day.snapshot.net_pnl) <= -Number(lossLimit)
   return (
     <section className="card locked" data-testid="locked-screen">
       {target ? (
@@ -19,6 +26,12 @@ export function LockedScreen({ day }: { day: Day }) {
         <div className="locked-icon"><Padlock size={28} closing /></div>
       )}
       <h2>{lockMessage(day.status.lock_reason)}</h2>
+      {pastLossLimit && (
+        <p className="form-error" data-testid="past-loss-limit">
+          Since the lock at {istTime(day.locked_at)}, the day has gone past your {inr(lossLimit)} loss
+          limit.
+        </p>
+      )}
       <p>Trading opens again on the next trading day at 09:15.</p>
       <dl className="facts">
         <dt>Net P&L</dt><dd className={pnlClass(day.snapshot.net_pnl)}>{inr(day.snapshot.net_pnl)}</dd>

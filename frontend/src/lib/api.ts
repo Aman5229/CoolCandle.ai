@@ -104,7 +104,7 @@ export interface Ticket {
   instrument_key: string
   lots: number
   limit_price: string
-  stop_trigger: string
+  stop_trigger: string | null // null: the plan's stop
   target?: string | null
   trailing?: { kind: TrailKind } | null
 }
@@ -113,10 +113,20 @@ export interface Preview {
   decision: { action: string; reasons: Reason[] }
   size: { lots: number; limited_by: string; limits: Record<string, number> } | null
   qty: number
+  stop: string
   stop_limit: string
   worst_case: string
+  to_stop_limit: string
+  slippage: string
   charges: string
   reward_risk: string | null
+}
+
+/** The stops today's plan allows for a number of lots at an entry; null ends mean none fits. */
+export interface StopRange {
+  lowest: string | null
+  highest: string | null
+  budget: string
 }
 
 export interface Trade {
@@ -243,7 +253,7 @@ function csrfToken(): string {
   return match?.[1] ? decodeURIComponent(match[1]) : ''
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (method !== 'GET') headers['X-CSRF-Token'] = csrfToken()
@@ -306,6 +316,8 @@ export const api = {
   news: () => get<Headline[]>('/market/news'),
 
   preview: (ticket: Ticket) => post<Preview>('/orders/preview', ticket),
+  stopRange: (key: string, entry: string, lots: number) =>
+    get<StopRange | null>(`/orders/stop-range?${new URLSearchParams({ key, entry, lots: String(lots) })}`),
   submit: (ticket: Ticket) => post<Trade>('/trades', ticket),
   exitTrade: (id: string) => post<Trade>(`/trades/${id}/exit`),
   cancelTrade: (id: string) => post<Trade>(`/trades/${id}/cancel`),
