@@ -65,7 +65,7 @@ more users and brokers can be added without a rewrite, but sign-up is closed in 
 | # | Question | Decision | Status |
 |---|---|---|---|
 | D1 | How does the user sign in? | CoolCandle account: email + password + authenticator TOTP (CoolCandle's own). Then **connect the broker each morning** with the broker's TOTP + MPIN. | DEFAULT |
-| D2 | "Only ask twice" for the day plan | Plan is a draft until confirmed **twice** (a summary dialog, then typing `LOCK`). After that it is frozen until the next trading day. Changes that only make it **stricter** are still allowed (lower target, lower loss limit, fewer trades, earlier cutoff), each with one confirmation. | DEFAULT |
+| D2 | "Only ask twice" for the day plan | Plan is a draft until confirmed **twice** (a summary dialog, then typing `LOCK`). After that the live plan is frozen until the next trading day (the paper plan stays editable, D16). Changes that only make it **stricter** are still allowed (lower target, lower loss limit, fewer trades, earlier cutoff), each with one confirmation. | DEFAULT |
 | D3 | Day profit target hit with a trade open | **Exit immediately** and lock (V1). In V4 this becomes "stop new entries, trail the open trade with profit protected". | DEFAULT |
 | D4 | Trades placed in the broker's own app | **Count both** their P&L and their number toward today's limits. | DEFAULT |
 | D5 | What can be traded | **NIFTY and SENSEX index options, buying only** (long CE / long PE), intraday product. Config list, so BANKNIFTY etc. can be added. | DEFAULT |
@@ -79,6 +79,10 @@ more users and brokers can be added without a rewrite, but sign-up is closed in 
 | D13 | Build approach | **All versions built together** (Aman, 7 Nov 2026), ahead of the order in §3. Nothing goes live on the strength of being built: each version's "done when" still applies, and live trailing stays off until Kotak confirms it is allowed. | **CONFIRMED** |
 | D14 | Extra entry rules | From the day-trading reference: no entries before `entry_start` (09:20), reward to risk at least `min_reward_risk` (1), and a stop at least 0.5% from the entry. Sizing reports which limit decided it, and also respects cash and freeze quantity. | DEFAULT |
 | D15 | Where the buddy runs | **Its own service**, `agent/` (Aman, 7 Nov 2026): the model, the conversation and the number check run there, with no database, no broker and no Kotak credentials. Core keeps every tool behind an internal route that answers only during the chat that called it (ADR 0004). **Text chat first; voice is added once the chat has been reviewed.** | **CONFIRMED** |
+| D16 | Editing the paper plan | **Paper and live keep a plan each per day.** A locked live plan only gets stricter (D2). A locked **paper** plan can be changed either way, because it guards no real money (Aman, 8 Nov 2026). Nothing done to the paper plan can reach the live one, every edit to a locked plan is recorded, and a paper day that has locked stays locked until the next trading day. | **CONFIRMED** |
+| D17 | Skill Test | **A practice arena of its own** (`docs/skill-test.md`): past NIFTY and SENSEX days replayed minute by minute from **Kotak's history** (fetched once with `uv run coolcandle fetch-index-history`, consumer key only), **index options priced by a model**, a practice fund, and a **run whose today only moves forward**, each session the next trading day. Its own tables, screens and discipline score, and no path to live trading (Aman, 8 Nov 2026). The model's details and S5 (closed while the live day is locked) are DEFAULT. | **CONFIRMED** |
+| D18 | Stop from the plan | A manual ticket takes **the plan's stop** unless a tighter one is typed: the furthest stop whose worst case fits `min(max_loss_per_trade, loss_limit + net_pnl)` for the lots chosen (`sizing.stop_range`). The server works it out when Buy is pressed, from the price sent. If no stop fits, the order is refused with "pick a cheaper strike". Signals keep their own stops. The stop still goes to the exchange the moment the entry fills (§10.3). | **CONFIRMED** (Aman, 17 Nov 2026) |
+| D19 | Leaving at the target | The target exit waits for the **bid** to reach the target, then turns the stop order into a limit sell at the bid, so the trade leaves at the target or above. The stop is modified, never cancelled first (§0 rule 4). If the sell does not fill, the usual 2-second re-price at the bid applies, even below the target, because a position never waits without protection (§10.3). | **CONFIRMED** (Aman, 17 Nov 2026) |
 
 When Aman confirms or changes a row, update the table and the sections that depend on it.
 
@@ -148,6 +152,9 @@ The buddy (D15). The browser only ever talks to core; the agent holds no data of
 - `adapters` import `domain` and `ports`.
 - `api` imports `services` and `domain`. Wiring (which adapter implements which port) happens
   in one place: `backend/src/coolcandle/main.py`.
+- Skill Test (D17) and live trading never import each other: `services.skill` can't reach
+  orders, guard, reconcile, trailing or the Kotak adapter, and no live service imports
+  `services.skill` or `domain.skill`.
 - The agent service (`agent/`) is a separate project. It cannot import core; it reaches core only
   through `/internal/agent/tools`, and core reaches it only through the `Agent` port.
 
@@ -166,6 +173,8 @@ The buddy (D15). The browser only ever talks to core; the agent holds no data of
 | Order sync | Kotak order feed (push) + poll every 2 s as fallback | Update orders/trades from the broker |
 | Reconcile | on login, on reconnect, every 5 s | Compare our trades/orders with broker positions/orders; fix or flag `NEEDS_ATTENTION` |
 | Scheduler | cron-like | 08:30 IST scrip master download; 09:00 day reset; 15:15 square-off; 15:45 recorder flush to Parquet; nightly backup |
+| Skill Test replays | one loop per session | Plays a past index day through that session's clock and PaperBroker, on its own `skill.*` topics (D17) |
+| Skill Test timer | every 1 s | Saves each replay's place every 5 s, so a restart resumes there |
 
 All tasks run with an injected `Clock`, so tests can replay a whole day in seconds.
 
@@ -197,7 +206,8 @@ coolcandle/
 ├── README.md                    # setup & run
 ├── docs/
 │   ├── adr/                     # one file per architecture decision (0001-*.md …)
-│   └── broker-notes/kotak-neo.md
+│   ├── broker-notes/kotak-neo.md
+│   └── skill-test.md            # Skill Test (D17)
 ├── backend/
 │   ├── pyproject.toml
 │   ├── alembic.ini
@@ -207,35 +217,39 @@ coolcandle/
 │   │   ├── cli.py               # create-admin, fetch-scrips, replay-day, backup
 │   │   ├── domain/
 │   │   │   ├── models.py        # Instrument, Tick, Candle, OrderRequest, Order, Position, Funds …
-│   │   │   ├── plan.py          # DailyPlan, plan edit rules (stricter-only)
+│   │   │   ├── plan.py          # DailyPlan, plan edit rules (live stricter-only, D16)
 │   │   │   ├── guard.py         # evaluate(plan, snapshot, request) -> Decision
 │   │   │   ├── sizing.py        # lots from risk budget
 │   │   │   ├── costs.py         # brokerage, STT, exchange, SEBI, stamp, GST estimate
 │   │   │   ├── trade_state.py   # Trade state machine (pure transitions)
-│   │   │   └── calendar.py      # trading days, holidays, session times (IST)
+│   │   │   ├── calendar.py      # trading days, holidays, session times (IST)
+│   │   │   └── skill/           # Skill Test (D17): rules, option model, charts, score, report
 │   │   ├── ports/
 │   │   │   ├── broker.py        # Broker protocol + BrokerSpec (fields for the connect form)
 │   │   │   ├── market_data.py
 │   │   │   ├── clock.py
 │   │   │   ├── signal_source.py # V2 (interface only in V1)
 │   │   │   ├── notifier.py      # V3 (interface only in V1)
-│   │   │   └── trailing.py      # V4 (interface only in V1)
+│   │   │   ├── trailing.py      # V4 (interface only in V1)
+│   │   │   └── skill.py         # Skill Test: klines, replay and its own broker factory
 │   │   ├── adapters/
-│   │   │   ├── brokers/kotak_neo/   # client.py, mapping.py, scrips.py, feed.py
+│   │   │   ├── brokers/kotak_neo/   # client.py, mapping.py, scrips.py, feed.py, history.py
 │   │   │   ├── brokers/paper/       # fills against live quotes
 │   │   │   ├── brokers/catalog.py   # Kotak live; Zerodha, Dhan, Angel One, Upstox coming soon
-│   │   │   └── market/replay/       # plays recorded Parquet days through MarketData
+│   │   │   ├── market/replay/       # plays recorded Parquet days through MarketData
+│   │   │   └── market/history/      # Skill Test: index minutes on disk, candle replay
 │   │   ├── services/
 │   │   │   ├── auth/            # users, password, app TOTP, sessions, lockout
 │   │   │   ├── accounts/        # broker accounts, encrypted credentials, daily connect
-│   │   │   ├── plans/           # draft → confirm x2 → locked; stricter edits
+│   │   │   ├── plans/           # draft → confirm x2 → locked; a plan per mode (D16)
 │   │   │   ├── guard/           # builds DaySnapshot, applies domain.guard, day locks
 │   │   │   ├── orders/          # OrderService (the one door), trade manager
 │   │   │   ├── market/          # feed manager, candle builder, option chain
 │   │   │   ├── recorder/        # tick recording + nightly Parquet
 │   │   │   ├── reconcile/
 │   │   │   ├── journal/         # day summaries, trade timelines
-│   │   │   └── scheduler/
+│   │   │   ├── scheduler/
+│   │   │   └── skill/           # Skill Test: SkillService, one arena per session, store
 │   │   ├── api/
 │   │   │   ├── deps.py          # current_user, current_account, mode
 │   │   │   ├── ws.py            # WebSocket hub
@@ -262,7 +276,7 @@ coolcandle/
 │       ├── lib/                 # api.ts, ws.ts, format.ts (₹, IST)
 │       ├── components/          # shared UI
 │       └── features/
-│           ├── auth/  brokers/  plan/  trading/  lock/  journal/  settings/
+│           ├── auth/  brokers/  plan/  trading/  lock/  journal/  settings/  skill/
 ├── deploy/
 │   ├── docker-compose.yml
 │   ├── Caddyfile
@@ -304,7 +318,7 @@ Every table has `id` (UUID), `created_at`, `updated_at` unless noted. Money colu
 | `sessions` | `user_id`, `token_hash`, `expires_at`, `ip`, `user_agent` | Cookie holds the token; DB holds the hash. |
 | `broker_accounts` | `user_id`, `broker` (`kotak_neo`), `label`, `credentials_enc` (JSON blob, encrypted), `status`, `last_connected_at` | Credentials for Kotak: consumer key, mobile, UCC, MPIN. Never the TOTP. |
 | `broker_sessions` | `broker_account_id`, `trading_date`, `session_enc`, `expires_at` | Today's broker tokens, encrypted. |
-| `daily_plans` | `broker_account_id`, `trading_date`, plan fields, `status`, `confirmations`, `locked_at` | Unique (`broker_account_id`, `trading_date`). |
+| `daily_plans` | `broker_account_id`, `trading_date`, `mode`, plan fields, `status`, `confirmations`, `locked_at` | Unique (`broker_account_id`, `trading_date`, `mode`): paper and live keep a plan each (D16). |
 | `plan_changes` | `plan_id`, `field`, `old`, `new`, `changed_at` | Stricter-only edits after lock; audit. |
 | `day_locks` | `broker_account_id`, `trading_date`, `mode` (paper/live), `reason` (TARGET/LOSS_LIMIT/MAX_TRADES/SQUARE_OFF), `snapshot` (JSONB), `locked_at` | Unique (`broker_account_id`, `trading_date`, `mode`). **No API deletes this row.** |
 | `orders` | `broker_account_id`, `mode`, `trade_id?`, `broker_order_id`, `request` (JSONB), `status`, `filled_qty`, `avg_price`, `reject_reason`, `external` (bool: placed outside CoolCandle) | |
@@ -314,6 +328,7 @@ Every table has `id` (UUID), `created_at`, `updated_at` unless noted. Money colu
 | `instruments` | scrip master fields, `trading_date` | Reloaded daily. |
 | `holidays` | `date`, `exchange`, `name` | Copied from NSE's F&O holiday circulars into `seeds.py` (BSE closes the same days). Startup makes the table match that list exactly, so a correction also removes a wrong date. A year is added only once NSE publishes it, usually in December. |
 | `settings` | `user_id`, `key`, `value` (JSONB) | Theme, defaults for the plan form. |
+| `skill_accounts` · `skill_runs` · `skill_sessions` · `skill_trades` · `skill_orders` · `skill_events` | See `docs/skill-test.md` §4.2 | Skill Test (D17). No live code reads or writes them, and Skill Test touches no other table. |
 
 ---
 
@@ -371,7 +386,8 @@ For `intent = ENTRY`, every check must pass:
 1. Plan is `LOCKED`, day not `LOCKED`, not `COOL_OFF`, not `ENTRIES_CLOSED`.
 2. No other open trade (D11).
 3. Underlying is in `allowed_underlyings`; instrument is an index option; side is BUY (D5); product MIS.
-4. A stop is given and is below the entry price.
+4. A stop is given and is below the entry price. A manual ticket with no stop takes the plan's
+   stop (D18) before this check runs, so the guard always checks a real number.
 5. **Worst-case loss fits.** `worst = (entry − stop_limit_price) × qty + est_charges(qty) + slippage_buffer`;
    require `worst ≤ max_loss_per_trade` and `worst ≤ loss_limit + net_pnl` (what's left of today's budget).
 6. Quantity is a whole number of lots and ≤ freeze quantity (slice if larger, later).
@@ -431,10 +447,11 @@ PROPOSED ─confirm─► ENTRY_PENDING ─fill─► OPEN ─exit trigger─►
 - **Entry**: LIMIT buy at the price on screen (marketable limit, never MARKET on options).
   If the ask has moved beyond the band since the user clicked, refuse with the new price.
 - **Stop**: placed the moment the entry fills, for the filled quantity, as **SL-limit**:
-  trigger = user stop, limit = trigger − 2% (min 1 tick). If the trigger is crossed and the
-  order is not filled in 2 s, modify to a marketable limit at the bid.
-- **Target**: tracked by CoolCandle (not a resting order). When LTP ≥ target, **modify the
-  stop order** into a limit sell at the bid. Never cancel the stop first.
+  trigger = the ticket's stop or the plan's (D18), limit = trigger − 2% (min 1 tick). If the
+  trigger is crossed and the order is not filled in 2 s, modify to a marketable limit at the bid.
+- **Target**: tracked by CoolCandle (not a resting order). When the **bid** reaches the target
+  (D19), **modify the stop order** into a limit sell at the bid, at or above the target. Never
+  cancel the stop first.
 - **Before any exit**, read the real position quantity so stop and exit can never both fill.
 - **Exit reasons**: STOP, TARGET, MANUAL, DAY_LOCK, SQUARE_OFF, TRAILING (V4).
 - Every transition writes a `trade_events` row.
@@ -544,7 +561,7 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 | `POST /broker-accounts` · `GET /broker-accounts` · `DELETE /broker-accounts/{id}` | Save/list/remove encrypted credentials |
 | `POST /broker-accounts/{id}/connect` | Daily connect with TOTP |
 | `POST /broker-accounts/{id}/test` | Check connection and whitelisted IP |
-| `GET /plan/today` · `PUT /plan/today` | Read / edit draft (or stricter-only edit) |
+| `GET /plan/today` · `PUT /plan/today` | Read / edit the plan of the session's mode: a draft, a stricter-only edit in live, or any edit in paper (D16) |
 | `POST /plan/today/confirm` | Body `{step: 1}` then `{step: 2, typed: "LOCK"}` |
 | `GET /day/status` | Day state, snapshot, reasons, lock |
 | `POST /mode` | `{mode: "paper" \| "live", typed: "LIVE"}`; refused with an open trade |
@@ -561,10 +578,13 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 | `POST /trades/{id}/stop` | Tighten a stop |
 | `GET /signals` · `POST /signals/{id}/take` · `POST /signals/{id}/decline` | V2 signals; `take` is the tap (D6) |
 | `POST /agent/chat` | V3 buddy: core forwards it to the agent service and returns the reply, with the signal card core's own tool approved |
+| `/skill/*` | Skill Test (D17): account and runs, sessions with a plan confirmed twice, replay control, preview, orders, stop, exit, report, chart. Listed in `docs/skill-test.md` §4.5 |
 | `POST /internal/agent/tools/{name}` | Not under `/api`, so Caddy never forwards it. The agent's tool calls; each needs the tool token of a chat in progress |
 
 **WebSocket `/ws`** (one connection, server push; client sends `subscribe` for instruments):
-`tick`, `candle`, `day_status`, `order_update`, `trade_update`, `alert`, `feed_status`.
+`tick`, `candle`, `day_status`, `order_update`, `trade_update`, `alert`, `feed_status`, and
+Skill Test's own `skill.tick`, `skill.candle`, `skill.session`, `skill.trade`, `skill.locked`,
+`skill.run_blown` and `skill.replay`, each sent only to the user it belongs to.
 
 ---
 
@@ -575,12 +595,13 @@ REST under `/api`, JSON, cookie auth. Errors: `{ "code": "PLAN_LOCKED", "message
 | Sign-in | Email, password, authenticator code |
 | Brokers | Catalog cards (Kotak live; others "Coming soon"); dynamic form; test connection; status (connected, session expired, IP not whitelisted) |
 | Morning connect | Broker TOTP field; shows funds after connect |
-| Today's plan | Form with ₹ fields and times; step 1 summary dialog; step 2 type `LOCK`; locked view with "make stricter" |
-| Trading | Index chart (1m/5m), option chain, order ticket (lots defaulted from sizing, stop required, target optional, preview of worst-case loss and charges), open trade card with live P&L, stop, target, Exit button |
+| Today's plan | Form with ₹ fields and times; step 1 summary dialog; step 2 type `LOCK`; locked view with "make stricter" (live) or "save changes" (paper, D16) |
+| Trading | Index chart (1m/5m), option chain, order ticket (stop from the plan unless a tighter one is typed (D18), target optional, preview of worst-case loss and charges), open trade card with live P&L, stop, target, Exit button |
 | Always-on header | Mode badge (PAPER / LIVE), day P&L meter between −loss limit and +target, trades left, feed age, day state |
 | Locked | Ordering greyed out, reason ("You reached today's loss limit. Trading opens again tomorrow at 09:15."), day summary, link to Kotak's kill switch |
 | Journal | Calendar of days with P&L and lock reason; trade timelines |
 | Settings | Theme, plan defaults, sessions, sign out everywhere |
+| Skill Test | Its own arcade look, and its HUD in place of the live header: lobby, session setup, arena with HUD, lock and blown screens, report card, history (`docs/skill-test.md` §5) |
 
 - **Theme:** dark and light, switched with a **1-second cross-fade** (View Transitions API, CSS
   transition fallback; disabled under `prefers-reduced-motion`).
@@ -689,6 +710,8 @@ CI blocks merge on: ruff, mypy strict, import-linter, pytest, tsc, lint, Vitest,
 - Offering CoolCandle to other users, or placing trades for them, needs legal advice first.
 - Charges (STT, exchange, SEBI fee, stamp duty, GST, brokerage) are **config values**, not constants;
   verify current rates before going live.
+- Skill Test (D17) replays NSE and BSE index history from Kotak for Aman's own use. Showing it to
+  anyone else needs a check of the exchanges' redistribution terms first.
 
 ---
 
